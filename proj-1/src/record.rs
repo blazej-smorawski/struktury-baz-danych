@@ -1,10 +1,13 @@
+use std::mem::size_of;
+
 use byteorder::{ByteOrder, LittleEndian};
 use rand::Rng;
 
 pub trait Record {
     fn new() -> Self;
-    fn from_bytes(&mut self, bytes: Vec<u8>) -> Result<(), std::io::Error>;
     fn get_size(&self) -> u64;
+    fn get_bytes(&self) -> Vec<u8>;
+    fn from_bytes(&mut self, bytes: Vec<u8>) -> Result<(), std::io::Error>;
     fn from_string(&mut self, string: String) -> Result<(), std::io::Error>;
     fn from_random(&mut self) -> Result<(), std::io::Error>;
     fn print();
@@ -19,6 +22,20 @@ impl Record for IntRecord {
         IntRecord { numbers: [0; 15] }
     }
 
+    fn get_size(&self) -> u64 {
+        return std::mem::size_of_val(&self.numbers) as u64;
+    }
+
+    fn get_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(size_of::<u32>() * self.numbers.len());
+
+        for value in self.numbers {
+            bytes.extend(&value.to_le_bytes());
+        }
+
+        bytes
+    }
+
     fn from_bytes(&mut self, bytes: Vec<u8>) -> Result<(), std::io::Error> {
         if self.get_size() != (bytes.len() as u64) {
             return Err(std::io::Error::new(
@@ -29,10 +46,6 @@ impl Record for IntRecord {
 
         LittleEndian::read_u32_into(&bytes, &mut self.numbers);
         Ok(())
-    }
-
-    fn get_size(&self) -> u64 {
-        return std::mem::size_of_val(&self.numbers) as u64;
     }
 
     fn from_string(&mut self, string: String) -> Result<(), std::io::Error> {
