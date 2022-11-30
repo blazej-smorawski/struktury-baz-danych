@@ -10,16 +10,17 @@ pub trait Record {
     fn from_bytes(&mut self, bytes: Vec<u8>) -> Result<(), std::io::Error>;
     fn from_string(&mut self, string: String) -> Result<(), std::io::Error>;
     fn from_random(&mut self) -> Result<(), std::io::Error>;
-    fn print();
+    fn print(&self);
 }
 
 pub struct IntRecord {
-    numbers: [u32; 15],
+    // TODO: make it 15
+    numbers: [u32; 16],
 }
 
 impl Record for IntRecord {
     fn new() -> Self {
-        IntRecord { numbers: [0; 15] }
+        IntRecord { numbers: [0; 16] }
     }
 
     fn get_size(&self) -> u64 {
@@ -65,7 +66,9 @@ impl Record for IntRecord {
         Ok(())
     }
 
-    fn print() {}
+    fn print(&self) {
+        println!("{:?}", self.numbers);
+    }
 }
 
 #[cfg(test)]
