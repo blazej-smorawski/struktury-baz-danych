@@ -25,36 +25,34 @@ impl<'a, T: Record> Tape<'_, T> {
         return tape;
     }
 
-    pub fn flush(&mut self) -> Result<(), std::io::Error> {
+    pub fn flush(&mut self) {
         if self.dirty {
-            self.device.write(self.lba, &self.buf)?;
+            self.device
+                .write(self.lba, &self.buf)
+                .expect("Could not write block");
+            self.dirty = false;
         }
-        Ok(())
     }
 
-    pub fn set_head(&mut self, offset: u64, lba: u64) -> Result<(), std::io::Error> {
+    pub fn set_head(&mut self, offset: u64, lba: u64) {
         if offset >= self.device.block_size {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Offset cannot be bigger than devices blocksize",
-            ));
+            panic!("Wrong offset");
         }
 
         if lba != self.lba {
             if self.dirty {
-                self.flush()?;
+                self.flush();
             }
-
+            self.buf.fill(0);
             self.lba = lba;
             self.outdated = true;
             self.dirty = false;
         }
 
         self.offset = offset;
-        Ok(())
     }
 
-    fn move_head_to_next(&mut self) -> Result<(), std::io::Error> {
+    fn move_head_to_next(&mut self) {
         let mut offset = self.offset + self.record.get_size();
         let mut lba = self.lba;
         if offset + self.record.get_size() > self.device.block_size {
@@ -62,31 +60,34 @@ impl<'a, T: Record> Tape<'_, T> {
             lba = self.lba + 1;
         }
 
-        self.set_head(offset, lba)?;
-        Ok(())
+        self.set_head(offset, lba);
     }
 
     pub fn read_next_record(&mut self) -> Result<&T, std::io::Error> {
         if self.outdated {
             match self.device.read(&mut self.buf, self.lba) {
                 Ok(_) => (),
-                Err(e) => return Err(e),
+                Err(_) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "Block not found",
+                    ))
+                }
             };
             self.outdated = false;
         }
 
         let src = self.offset as usize;
         let len = self.record.get_size() as usize;
-        self.record.from_bytes(self.buf[src..src + len].to_vec())?;
+        self.record
+            .from_bytes(self.buf[src..src + len].to_vec())
+            .expect("Could not create record from the bytes");
 
-        match self.move_head_to_next() {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        };
+        self.move_head_to_next();
         return Ok(&self.record);
     }
 
-    pub fn write_next_record(&mut self, record: &T) -> () {
+    pub fn write_next_record(&mut self, record: &T) {
         self.dirty = true;
         let src = record.get_bytes();
         let off = self.offset as usize;
@@ -97,31 +98,21 @@ impl<'a, T: Record> Tape<'_, T> {
         self.move_head_to_next();
     }
 
-    pub fn print(&mut self) -> Result<(), std::io::Error> {
+    pub fn print(&mut self) {
         let old_offset = self.offset;
         let old_lba = self.lba;
-        let old_buf = self.buf.clone();
-        let old_outdated = self.outdated;
-        let old_dirty = self.dirty;
-        let old_record = self.record.get_bytes();
 
-        self.set_head(0, 0)?;
+        self.set_head(0, 0);
         loop {
             match self.read_next_record() {
                 Ok(record) => record.print(),
-                Err(e) => {
-                    println!("{}", e);
-                    break;
-                }
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::NotFound => break,
+                    _ => panic!("{}", e.to_string()),
+                },
             };
         }
 
-        self.offset = old_offset;
-        self.lba = old_lba;
-        self.buf.copy_from_slice(&old_buf);
-        self.outdated = old_outdated;
-        self.dirty = old_dirty;
-        self.record.from_bytes(old_record)?;
-        Ok(())
+        self.set_head(old_offset, old_lba);
     }
 }

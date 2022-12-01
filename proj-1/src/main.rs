@@ -17,12 +17,11 @@ fn run() -> Result<(), std::io::Error> {
     let buf = device.write(0, &vec![0xDE; 240])?;
     let mut tape = Tape::<IntRecord>::new(& mut device);
     let mut record = IntRecord::new();
-    record.from_string("1 2 3 4 5 6 7 8".to_string())?;
-    for i in vec![1,2,3,4,5,6] {
+    for i in vec![1,2,3,4,5] {
+        record.from_bytes(vec![i;record.get_size() as usize]).unwrap();
         tape.write_next_record(&record);
-        println!("----");
-        tape.print();
     }
+    tape.print();
     Ok(())
 }
 
