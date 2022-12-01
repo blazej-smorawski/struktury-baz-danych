@@ -5,7 +5,7 @@ use primes::is_prime;
 use rand::Rng;
 
 
-pub trait Record: PartialOrd {
+pub trait Record: PartialOrd+Copy {
     fn new() -> Self;
     fn get_size(&self) -> u64;
     fn get_bytes(&self) -> Vec<u8>;
@@ -15,9 +15,24 @@ pub trait Record: PartialOrd {
     fn print(&self);
 }
 
+#[derive(Copy, Clone)]
 pub struct IntRecord {
     // TODO: make it 15
     numbers: [u32; 16],
+}
+
+impl IntRecord {
+    fn get_primes(&self) -> u32 {
+        let mut primes: u32 = 0;
+        let mut other_primes: u32 = 0;
+
+        for num in self.numbers {
+            if is_prime(num as u64) {
+                primes += 1;
+            }
+        }
+        primes
+    }
 }
 
 impl Record for IntRecord {
@@ -64,30 +79,22 @@ impl Record for IntRecord {
 
     fn from_random(&mut self) -> Result<(), std::io::Error> {
         let mut rng = rand::thread_rng();
-        self.numbers = rng.gen();
+        for number in &mut self.numbers {
+            *number = rng.gen_range(0..10);
+        }
         Ok(())
     }
 
     fn print(&self) {
-        println!("{:?}", self.numbers);
+        println!("{:?} <=> {}", self.numbers, self.get_primes());
     }
 }
 
 impl PartialOrd for IntRecord {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let mut primes: u32 = 0;
-        let mut other_primes: u32 = 0;
+        let mut primes: u32 = self.get_primes();
+        let mut other_primes: u32 = other.get_primes();
 
-        for num in self.numbers {
-            if is_prime(num as u64) {
-                primes += 1;
-            }
-        }
-        for num in other.numbers {
-            if is_prime(num as u64) {
-                other_primes += 1;
-            }
-        }
         primes.partial_cmp(&other_primes)
     }
 }
@@ -131,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_from_bytes() -> Result<(), std::io::Error> {
-        let mut bytes: Vec<u8> = vec![0u8; 15*size_of::<u32>()];
+        let mut bytes: Vec<u8> = vec![0u8; 16*size_of::<u32>()];
         bytes[0] = 1;
         bytes[1] = 0;
         bytes[2] = 0;

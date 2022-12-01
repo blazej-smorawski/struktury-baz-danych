@@ -63,7 +63,7 @@ impl<'a, T: Record> Tape<'_, T> {
         self.set_head(offset, lba);
     }
 
-    pub fn read_next_record(&mut self) -> Result<&T, std::io::Error> {
+    pub fn read_next_record(&mut self) -> Result<T, std::io::Error> {
         if self.outdated {
             match self.device.read(&mut self.buf, self.lba) {
                 Ok(_) => (),
@@ -84,7 +84,7 @@ impl<'a, T: Record> Tape<'_, T> {
             .expect("Could not create record from the bytes");
 
         self.move_head_to_next();
-        return Ok(&self.record);
+        return Ok(self.record);
     }
 
     pub fn write_next_record(&mut self, record: &T) {
