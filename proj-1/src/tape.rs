@@ -1,4 +1,4 @@
-use crate::{device::BlockDevice, record::Record};
+use crate::{device::BlockDevice, record::{Record, IntRecord}};
 
 pub struct Tape<'a, T: Record> {
     device: &'a mut BlockDevice,
@@ -99,20 +99,31 @@ impl<'a, T: Record> Tape<'_, T> {
     }
 
     pub fn print(&mut self) {
-        let old_offset = self.offset;
-        let old_lba = self.lba;
+        let mut buf = vec![0; self.device.block_size as usize];
+        let mut lba: u64 = 0;
 
-        self.set_head(0, 0);
         loop {
-            match self.read_next_record() {
-                Ok(record) => record.print(),
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::NotFound => break,
-                    _ => panic!("{}", e.to_string()),
-                },
-            };
-        }
+            println!("BLOCK #{}", lba);
+            if self.lba == lba {
+                buf.copy_from_slice(&self.buf);
+            } else {
+                match self.device.read(&mut buf, lba) {
+                    Ok(_) => (),
+                    Err(_) => break,
+                };
+            }
 
-        self.set_head(old_offset, old_lba);
+            let mut off: usize = 0;
+            let len: usize = self.record.get_size() as usize;
+            let mut rec: T = T::new();
+            while off + len < self.device.block_size as usize{
+                let slice = buf[off..off + len].to_vec();
+                rec.from_bytes(slice).unwrap();
+                rec.print();
+                off += len;
+            }
+
+            lba += 1;
+        }
     }
 }
