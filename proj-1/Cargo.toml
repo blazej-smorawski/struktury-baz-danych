@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 byteorder = "1.4.3" 
 rand = "0.8.5"
+primes = "0.3.0"

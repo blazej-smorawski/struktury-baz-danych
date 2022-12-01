@@ -1,9 +1,11 @@
-use std::mem::size_of;
+use std::{mem::size_of, cmp::Ordering};
 
 use byteorder::{ByteOrder, LittleEndian};
+use primes::is_prime;
 use rand::Rng;
 
-pub trait Record {
+
+pub trait Record: PartialOrd {
     fn new() -> Self;
     fn get_size(&self) -> u64;
     fn get_bytes(&self) -> Vec<u8>;
@@ -68,6 +70,44 @@ impl Record for IntRecord {
 
     fn print(&self) {
         println!("{:?}", self.numbers);
+    }
+}
+
+impl PartialOrd for IntRecord {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let mut primes: u32 = 0;
+        let mut other_primes: u32 = 0;
+
+        for num in self.numbers {
+            if is_prime(num as u64) {
+                primes += 1;
+            }
+        }
+        for num in other.numbers {
+            if is_prime(num as u64) {
+                other_primes += 1;
+            }
+        }
+        primes.partial_cmp(&other_primes)
+    }
+}
+
+impl PartialEq for IntRecord {
+    fn eq(&self, other: &Self) -> bool {
+        let mut primes: u32 = 0;
+        let mut other_primes: u32 = 0;
+
+        for num in self.numbers {
+            if is_prime(num as u64) {
+                primes += 1;
+            }
+        }
+        for num in other.numbers {
+            if is_prime(num as u64) {
+                other_primes += 1;
+            }
+        }
+        primes == other_primes
     }
 }
 
