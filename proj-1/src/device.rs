@@ -9,8 +9,8 @@ pub struct BlockDevice {
 }
 
 impl BlockDevice {
-    pub fn new(filename: String, blocksize: u64) -> Result<BlockDevice, std::io::Error> {
-        let file: File = OpenOptions::new().truncate(true).read(true).write(true).create(true).open(filename)?;
+    pub fn new(filename: String, blocksize: u64, truncate: bool) -> Result<BlockDevice, std::io::Error> {
+        let file: File = OpenOptions::new().truncate(truncate).read(true).write(true).create(true).open(filename)?;
         let device = BlockDevice {
             file: file,
             block_size: blocksize,

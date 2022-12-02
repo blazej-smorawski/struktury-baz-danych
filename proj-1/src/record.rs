@@ -5,7 +5,7 @@ use primes::is_prime;
 use rand::Rng;
 
 
-pub trait Record: PartialOrd+Copy {
+pub trait Record: Ord+Copy {
     fn new() -> Self;
     fn get_size(&self) -> u64;
     fn get_bytes(&self) -> Vec<u8>;
@@ -24,7 +24,6 @@ pub struct IntRecord {
 impl IntRecord {
     fn get_primes(&self) -> u32 {
         let mut primes: u32 = 0;
-        let mut other_primes: u32 = 0;
 
         for num in self.numbers {
             if is_prime(num as u64) {
@@ -63,6 +62,12 @@ impl Record for IntRecord {
         };
 
         LittleEndian::read_u32_into(&bytes, &mut self.numbers);
+        if self.numbers[0] == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Empty record",
+            ));
+        }
         Ok(())
     }
 
@@ -80,7 +85,7 @@ impl Record for IntRecord {
     fn from_random(&mut self) -> Result<(), std::io::Error> {
         let mut rng = rand::thread_rng();
         for number in &mut self.numbers {
-            *number = rng.gen_range(0..10);
+            *number = rng.gen_range(1..10);
         }
         Ok(())
     }
@@ -90,14 +95,22 @@ impl Record for IntRecord {
     }
 }
 
-impl PartialOrd for IntRecord {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let mut primes: u32 = self.get_primes();
-        let mut other_primes: u32 = other.get_primes();
+impl Ord for IntRecord {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let primes: u32 = self.get_primes();
+        let other_primes: u32 = other.get_primes();
 
-        primes.partial_cmp(&other_primes)
+        primes.cmp(&other_primes)
     }
 }
+
+impl PartialOrd for IntRecord {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for IntRecord {}
 
 impl PartialEq for IntRecord {
     fn eq(&self, other: &Self) -> bool {
