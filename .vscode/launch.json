@@ -1,0 +1,32 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Strings",
+            "program": "${workspaceFolder}/proj-1/target/debug/proj-1",
+            "args": ["-s"],
+            "cwd": "${workspaceFolder}/proj-1"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Random",
+            "program": "${workspaceFolder}/proj-1/target/debug/proj-1",
+            "args": ["-r", "8"],
+            "cwd": "${workspaceFolder}/proj-1"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "File",
+            "program": "${workspaceFolder}/proj-1/target/debug/proj-1",
+            "args": ["-f", "tape-ex.txt"],
+            "cwd": "${workspaceFolder}/proj-1"
+        }
+    ]
+}

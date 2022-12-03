@@ -99,10 +99,7 @@ impl<'a, T: Record> Tape<'_, T> {
     }
 
     pub fn split(&mut self, helper: &mut Tape<T>, other_helper: &mut Tape<T>) -> u64 {
-        println!(
-            "{}",
-            format!("---->{: <57}", " SPLIT ").green()
-        );
+        println!("{}", format!("---->{: <57}", " SPLIT ").green());
 
         self.set_head(0, 0);
         helper.set_head(0, 0);
@@ -123,20 +120,14 @@ impl<'a, T: Record> Tape<'_, T> {
 
             previous_record = Some(record);
         }
-        
+
         let empty_record = T::new();
         helper.write_next_record(&empty_record);
         other_helper.write_next_record(&empty_record);
 
-        println!(
-            "{}",
-            format!("{:-^58}", " TAPE 1 ").blue()
-        );
+        println!("{}", format!("{:-^58}", " TAPE 1 ").blue());
         helper.print();
-        println!(
-            "{}",
-            format!("{:-^58}", " TAPE 2 ").blue()
-        );
+        println!("{}", format!("{:-^58}", " TAPE 2 ").blue());
         other_helper.print();
         println!(
             "{}",
@@ -147,10 +138,7 @@ impl<'a, T: Record> Tape<'_, T> {
     }
 
     pub fn join(&mut self, helper: &mut Tape<T>, other_helper: &mut Tape<T>) -> u64 {
-        println!(
-            "{}",
-            format!("---->{: <53}", " JOIN ").green()
-        );
+        println!("{}", format!("---->{: <53}", " JOIN ").green());
 
         let mut series: u64 = 1;
 
@@ -229,12 +217,15 @@ impl<'a, T: Record> Tape<'_, T> {
                 "{}",
                 format!(
                     ">{: <57}",
-                    format!(" RUN {} ", run)
+                    format!(
+                        " RUN -> {}, READS -> {}, WRITES -> {} ",
+                        run, self.device.reads + first_helper.device.reads + second_helper.device.reads, self.device.writes + first_helper.device.writes + second_helper.device.writes
+                    )
                 )
                 .red()
                 .bold()
             );
-            let mut  series: u64 = self.split(&mut first_helper, &mut second_helper);
+            let mut series: u64 = self.split(&mut first_helper, &mut second_helper);
             if series == 1 {
                 break;
             }
@@ -264,9 +255,19 @@ impl<'a, T: Record> Tape<'_, T> {
 
         println!(
             "{}",
+            format!(">{:->57}", format!(" RUNS -> {} ", run))
+                .red()
+                .bold()
+        );
+
+        println!(
+            "{}",
             format!(
                 ">{:->57}",
-                format!(" RUNS -> {} ", run)
+                format!(
+                    " READS -> {} ",
+                    self.device.reads + first_helper.device.reads + second_helper.device.reads
+                )
             )
             .red()
             .bold()
@@ -276,17 +277,10 @@ impl<'a, T: Record> Tape<'_, T> {
             "{}",
             format!(
                 ">{:->57}",
-                format!(" READS -> {} ", self.device.reads)
-            )
-            .red()
-            .bold()
-        );
-
-        println!(
-            "{}",
-            format!(
-                ">{:->57}",
-                format!(" WRITES -> {} ", self.device.writes)
+                format!(
+                    " WRITES -> {} ",
+                    self.device.writes + first_helper.device.writes + second_helper.device.writes
+                )
             )
             .red()
             .bold()
