@@ -74,4 +74,5 @@ fn main() {
     }
 
     tape.sort();
+    tape.flush();
 }
