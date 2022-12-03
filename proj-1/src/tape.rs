@@ -123,6 +123,10 @@ impl<'a, T: Record> Tape<'_, T> {
 
             previous_record = Some(record);
         }
+        
+        let empty_record = T::new();
+        helper.write_next_record(&empty_record);
+        other_helper.write_next_record(&empty_record);
 
         println!(
             "{}",
@@ -242,6 +246,7 @@ impl<'a, T: Record> Tape<'_, T> {
 
             run += 1;
         }
+
         println!(
             "{}",
             format!(">------======{:=^32}======------<", " DONE ")
@@ -250,6 +255,42 @@ impl<'a, T: Record> Tape<'_, T> {
         );
 
         self.print();
+        println!(
+            "{}",
+            format!(">------======{:=^32}======------<", " SUMMARY ")
+                .cyan()
+                .bold()
+        );
+
+        println!(
+            "{}",
+            format!(
+                ">{:->57}",
+                format!(" RUNS -> {} ", run)
+            )
+            .red()
+            .bold()
+        );
+
+        println!(
+            "{}",
+            format!(
+                ">{:->57}",
+                format!(" READS -> {} ", self.device.reads)
+            )
+            .red()
+            .bold()
+        );
+
+        println!(
+            "{}",
+            format!(
+                ">{:->57}",
+                format!(" WRITES -> {} ", self.device.writes)
+            )
+            .red()
+            .bold()
+        );
     }
 
     pub fn print(&mut self) {
@@ -264,7 +305,7 @@ impl<'a, T: Record> Tape<'_, T> {
             if self.lba == lba {
                 buf.copy_from_slice(&self.buf);
             } else {
-                match self.device.read(&mut buf, lba) {
+                match self.device.read_internal(&mut buf, lba) {
                     Ok(_) => (),
                     Err(_) => break,
                 };
