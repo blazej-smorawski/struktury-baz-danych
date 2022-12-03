@@ -1,11 +1,10 @@
-use std::{mem::size_of, cmp::Ordering};
+use std::{cmp::Ordering, mem::size_of};
 
 use byteorder::{ByteOrder, LittleEndian};
 use primes::is_prime;
 use rand::Rng;
 
-
-pub trait Record: Ord+Copy {
+pub trait Record: Ord + Copy {
     fn new() -> Self;
     fn get_size(&self) -> u64;
     fn get_bytes(&self) -> Vec<u8>;
@@ -133,7 +132,7 @@ impl PartialEq for IntRecord {
 
 #[cfg(test)]
 mod tests {
-    use std::mem::{size_of};
+    use std::mem::size_of;
 
     use super::*;
 
@@ -151,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_from_bytes() -> Result<(), std::io::Error> {
-        let mut bytes: Vec<u8> = vec![0u8; 16*size_of::<u32>()];
+        let mut bytes: Vec<u8> = vec![0u8; 16 * size_of::<u32>()];
         bytes[0] = 1;
         bytes[1] = 0;
         bytes[2] = 0;

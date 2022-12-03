@@ -1,12 +1,6 @@
-use std::iter;
-
 use colored::Colorize;
 
-use crate::{
-    device::BlockDevice,
-    help,
-    record::{self, IntRecord, Record},
-};
+use crate::{device::BlockDevice, record::Record};
 
 pub struct Tape<'a, T: Record> {
     device: &'a mut BlockDevice,
@@ -87,7 +81,6 @@ impl<'a, T: Record> Tape<'_, T> {
             Err(_) => return None,
         }
 
-
         self.move_head_to_next();
         return Some(self.record);
     }
@@ -108,10 +101,13 @@ impl<'a, T: Record> Tape<'_, T> {
     pub fn split(&mut self, helper: &mut Tape<T>, other_helper: &mut Tape<T>) -> u64 {
         println!(
             "{}",
-            format!("-------======Split tape======-------").green()
+            format!("---->{: <57}", " SPLIT ").green()
         );
 
-        let mut series: u64 = 0;
+        self.set_head(0, 0);
+        helper.set_head(0, 0);
+        other_helper.set_head(0, 0);
+        let mut series: u64 = 1;
         let mut previous_record = None;
 
         while let Some(record) = self.read_next_record() {
@@ -127,18 +123,21 @@ impl<'a, T: Record> Tape<'_, T> {
 
             previous_record = Some(record);
         }
-        
+
         println!(
             "{}",
-            format!("-------________Tape 1________-------").blue()
+            format!("{:-^58}", " TAPE 1 ").blue()
         );
         helper.print();
         println!(
             "{}",
-            format!("-------________Tape 1________-------").blue()
+            format!("{:-^58}", " TAPE 2 ").blue()
         );
         other_helper.print();
-        println!("{}", format!("Series -> {}", series).bright_blue().bold().blink());
+        println!(
+            "{}",
+            format!(">{:->57}", format!(" SERIES {} ", series)).bright_blue()
+        );
 
         series
     }
@@ -146,7 +145,7 @@ impl<'a, T: Record> Tape<'_, T> {
     pub fn join(&mut self, helper: &mut Tape<T>, other_helper: &mut Tape<T>) -> u64 {
         println!(
             "{}",
-            format!("-------======Join helper tapes======-------").green()
+            format!("---->{: <53}", " JOIN ").green()
         );
 
         let mut series: u64 = 1;
@@ -195,7 +194,62 @@ impl<'a, T: Record> Tape<'_, T> {
         }
 
         self.print();
+        println!(
+            "{}",
+            format!(">{:->57}", format!(" SERIES {} ", series)).bright_blue()
+        );
+
         series
+    }
+
+    pub fn sort(&mut self) {
+        println!(
+            "{}",
+            format!("-------______{:_^32}______-------", " TAPE ").blue()
+        );
+        self.print();
+        self.set_head(0, 0);
+
+        let mut first_device =
+            BlockDevice::new("helper1.txt".to_string(), self.device.block_size, true)
+                .expect("Could not create device!");
+        let mut first_helper = Tape::<T>::new(&mut first_device);
+        let mut second_device =
+            BlockDevice::new("helper2.txt".to_string(), self.device.block_size, true)
+                .expect("Could not create device!");
+        let mut second_helper = Tape::<T>::new(&mut second_device);
+
+        let mut run: u64 = 1;
+        loop {
+            println!(
+                "{}",
+                format!(
+                    ">{: <57}",
+                    format!(" RUN {} ", run)
+                )
+                .red()
+                .bold()
+            );
+            let mut  series: u64 = self.split(&mut first_helper, &mut second_helper);
+            if series == 1 {
+                break;
+            }
+
+            series = self.join(&mut first_helper, &mut second_helper);
+            if series == 1 {
+                break;
+            }
+
+            run += 1;
+        }
+        println!(
+            "{}",
+            format!(">------======{:=^32}======------<", " DONE ")
+                .cyan()
+                .bold()
+        );
+
+        self.print();
     }
 
     pub fn print(&mut self) {
@@ -203,7 +257,10 @@ impl<'a, T: Record> Tape<'_, T> {
         let mut lba: u64 = 0;
 
         loop {
-            println!("BLOCK #{}", lba);
+            println!(
+                "{}",
+                format!("    {:-<54}", format!(" BLOCK {} ", lba)).yellow()
+            );
             if self.lba == lba {
                 buf.copy_from_slice(&self.buf);
             } else {

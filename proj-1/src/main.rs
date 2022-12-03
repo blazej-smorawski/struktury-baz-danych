@@ -1,7 +1,6 @@
 pub mod device;
 pub mod record;
 pub mod tape;
-use colored::Colorize;
 use std::io::BufRead;
 use std::{env, io};
 
@@ -59,12 +58,14 @@ fn main() {
         };
 
         for _ in 0..num {
-            record.from_random();
+            record
+                .from_random()
+                .expect("Could not generate random record");
             tape.write_next_record(&record);
         }
     } else if args[1] == "-f" {
         device = BlockDevice::new(args[2].to_string(), 240, false).expect("Could not open device!");
-        tape = Tape::<IntRecord>::new(&mut device);  
+        tape = Tape::<IntRecord>::new(&mut device);
         // In order to read first buffer into memory
         tape.read_next_record();
         tape.set_head(0, 0);
@@ -72,18 +73,5 @@ fn main() {
         panic!("Specify options for creation of tape!")
     }
 
-    tape.print();
-    tape.set_head(0, 0);
-
-    let mut helper_device1 =
-        BlockDevice::new("helper1.txt".to_string(), 240, true).expect("Could not create device!");
-    let mut helper_tape1 = Tape::<IntRecord>::new(&mut helper_device1);
-    let mut helper_device2 =
-        BlockDevice::new("helper2.txt".to_string(), 240, true).expect("Could not create device!");
-    let mut helper_tape2 = Tape::<IntRecord>::new(&mut helper_device2);
-
-    let series = tape.split(&mut helper_tape1, &mut helper_tape2);
-
-    tape.set_head(0, 0);
-    tape.join(&mut helper_tape1, &mut helper_tape2);
+    tape.sort();
 }
