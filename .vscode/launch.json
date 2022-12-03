@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "Strings",
             "program": "${workspaceFolder}/proj-1/target/debug/proj-1",
-            "args": ["-s"],
+            "args": ["-b", "230", "-s"],
             "cwd": "${workspaceFolder}/proj-1"
         },
         {
@@ -17,7 +17,7 @@
             "request": "launch",
             "name": "Random",
             "program": "${workspaceFolder}/proj-1/target/debug/proj-1",
-            "args": ["-r", "8"],
+            "args": ["-b", "230", "-r", "8"],
             "cwd": "${workspaceFolder}/proj-1"
         },
         {
@@ -25,7 +25,7 @@
             "request": "launch",
             "name": "File",
             "program": "${workspaceFolder}/proj-1/target/debug/proj-1",
-            "args": ["-f", "tape-ex.txt"],
+            "args": ["-b", "230", "-f", "tape-ex.txt"],
             "cwd": "${workspaceFolder}/proj-1"
         }
     ]

@@ -30,10 +30,18 @@ fn main() {
     let mut device: BlockDevice;
     let mut tape: Tape<IntRecord>;
     let mut record = IntRecord::new();
+    let mut blocksize: u64 = 230;
 
-    if args[1] == "-s" {
+    if args[1] == "-b" {
+        blocksize = match args[2].parse() {
+            Ok(num) => num,
+            Err(e) => panic!("Error when parsing `-b` : {}", e.to_string()),
+        };
+    }
+
+    if args[3] == "-s" {
         device =
-            BlockDevice::new("tape.txt".to_string(), 240, true).expect("Could not create device!");
+            BlockDevice::new("tape.txt".to_string(), blocksize, true).expect("Could not create device!");
         tape = Tape::<IntRecord>::new(&mut device);
 
         println!("Please write single record and follow it by `return`");
@@ -42,17 +50,17 @@ fn main() {
         let lines = handle.lines();
         for line in lines {
             match record.from_string(line.expect("Could not read line")) {
-                Ok(_) => (),
+                Ok(_) => record.print(),
                 Err(_) => println!("Could not read the line into a record"),
             }
             tape.write_next_record(&record);
         }
-    } else if args[1] == "-r" {
+    } else if args[3] == "-r" {
         device =
-            BlockDevice::new("tape.txt".to_string(), 240, true).expect("Could not create device!");
+            BlockDevice::new("tape.txt".to_string(), blocksize, true).expect("Could not create device!");
         tape = Tape::<IntRecord>::new(&mut device);
 
-        let num: u32 = match args[2].parse() {
+        let num: u32 = match args[4].parse() {
             Ok(num) => num,
             Err(e) => panic!("Error when parsing `-r` : {}", e.to_string()),
         };
@@ -63,8 +71,8 @@ fn main() {
                 .expect("Could not generate random record");
             tape.write_next_record(&record);
         }
-    } else if args[1] == "-f" {
-        device = BlockDevice::new(args[2].to_string(), 240, false).expect("Could not open device!");
+    } else if args[3] == "-f" {
+        device = BlockDevice::new(args[4].to_string(), blocksize, false).expect("Could not open device!");
         tape = Tape::<IntRecord>::new(&mut device);
         // In order to read first buffer into memory
         tape.read_next_record();

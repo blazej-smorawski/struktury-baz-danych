@@ -16,8 +16,7 @@ pub trait Record: Ord + Copy {
 
 #[derive(Copy, Clone)]
 pub struct IntRecord {
-    // TODO: make it 15
-    numbers: [u32; 16],
+    numbers: [u32; 15],
 }
 
 impl IntRecord {
@@ -35,7 +34,7 @@ impl IntRecord {
 
 impl Record for IntRecord {
     fn new() -> Self {
-        IntRecord { numbers: [0; 16] }
+        IntRecord { numbers: [0; 15] }
     }
 
     fn get_size(&self) -> u64 {
@@ -143,7 +142,7 @@ mod tests {
 
         assert_eq!(
             record.numbers,
-            [1u32, 2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            [1u32, 2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0]
         );
         Ok(())
     }
@@ -165,7 +164,7 @@ mod tests {
 
         assert_eq!(
             record.numbers,
-            [1u32, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            [1u32, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         );
         Ok(())
     }

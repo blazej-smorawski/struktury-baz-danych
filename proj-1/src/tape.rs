@@ -308,7 +308,7 @@ impl<'a, T: Record> Tape<'_, T> {
             let mut off: usize = 0;
             let len: usize = self.record.get_size() as usize;
             let mut rec: T = T::new();
-            while off + len < self.device.block_size as usize {
+            while off + len <= self.device.block_size as usize {
                 let slice = buf[off..off + len].to_vec();
                 match rec.from_bytes(slice) {
                     Ok(_) => (),
