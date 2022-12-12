@@ -1,8 +1,12 @@
 use byteorder::{LittleEndian, ByteOrder};
 
 pub trait BTreeKey: Ord + Copy {
-    fn from_bytes(bytes: &Vec<u8>) -> Self;
+    fn is_valid(&self) -> bool;
+    fn invalidate(&mut self);
     fn to_bytes(&self) -> Vec<u8>;
+
+    fn invalid() -> Self;
+    fn from_bytes(bytes: &[u8]) -> Self;
     fn get_size() -> u64;
 }
 
@@ -12,16 +16,28 @@ pub struct IntKey {
 }
 
 impl BTreeKey for IntKey {
-    fn from_bytes(bytes: &Vec<u8>) -> Self {
-        IntKey {
-            value: LittleEndian::read_i32(bytes)
-        }
+    fn is_valid(&self) -> bool {
+        return self.value == i32::min_value()
+    }
+
+    fn invalidate(&mut self) {
+        self.value = i32::min_value();
     }
 
     fn to_bytes(&self) -> Vec<u8> {
         let mut buf = vec![0u8; 4];
         LittleEndian::write_i32(&mut buf, self.value);
         buf
+    }
+
+    fn invalid() -> Self{
+        IntKey {value: i32::min_value()}
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        IntKey {
+            value: LittleEndian::read_i32(bytes)
+        }
     }
 
     fn get_size() -> u64 {

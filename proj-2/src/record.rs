@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_from_string() -> Result<(), std::io::Error> {
-        let mut record= IntRecord::from_string("1 2 3 4 5 6 7".to_string())?;
+        let record= IntRecord::from_string("1 2 3 4 5 6 7".to_string())?;
 
         assert_eq!(
             record.numbers,

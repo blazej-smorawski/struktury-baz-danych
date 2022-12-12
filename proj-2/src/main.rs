@@ -12,11 +12,7 @@ use crate::{device::BlockDevice, btree::{BTree}, record::IntRecord, btree_key::I
 fn main() {
     let index_device = BlockDevice::new("index.hex".to_string(), 256, true).expect("Could not create index device");
     let data_device = BlockDevice::new("index.hex".to_string(), 256, true).expect("Could not create data device");
-    let b_tree = BTree::<IntKey, IntRecord> {
-        index_device,
-        data_device,
-        loaded_index: vec![],
-        loaded_data: vec![]    
-    };
+    let b_tree = BTree::<IntKey, IntRecord>::new(index_device, data_device);
+
     println!("Hello, world!");
 }

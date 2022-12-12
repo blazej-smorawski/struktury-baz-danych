@@ -9,7 +9,15 @@ pub struct BTreeRecord<K: BTreeKey> {
 }
 
 impl<K: BTreeKey> BTreeRecord<K> {
-    pub fn from_bytes(bytes: &Vec<u8>) -> Self {
+    pub fn invalid() -> Self {
+        BTreeRecord::<K> {
+            child_lba: None,
+            key: K::invalid(),
+            data_lba: 0,
+        }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
         let mut record = BTreeRecord::<K> {
             child_lba: None,
             key: K::from_bytes(&bytes[17..].to_vec()),
@@ -40,7 +48,7 @@ impl<K: BTreeKey> BTreeRecord<K> {
         bytes
     }
 
-    fn get_size() -> u64 {
+    pub fn get_size() -> u64 {
         1 + (2 * std::mem::size_of::<u64>()) as u64 + K::get_size()
     }
 }
@@ -89,10 +97,7 @@ mod tests {
 
         let record_from_bytes = BTreeRecord::<IntKey>::from_bytes(&bytes);
 
-        assert_eq!(
-            record,
-            record_from_bytes,
-        );
+        assert_eq!(record, record_from_bytes,);
 
         Ok(())
     }
@@ -107,16 +112,28 @@ mod tests {
         };
 
         let bytes = vec![
-            0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0xEE, 0xFF, 0xEE, 0xFF, 0xEE,
-            0xFF, 0xEE, 0xFF, 7, 0, 0, 0,
+            0u8, 0, 0, 0, 0, 0, 0, 0, 0, 0xEE, 0xFF, 0xEE, 0xFF, 0xEE, 0xFF, 0xEE, 0xFF, 7, 0, 0, 0,
         ];
 
         let record_from_bytes = BTreeRecord::<IntKey>::from_bytes(&bytes);
 
-        assert_eq!(
-            record,
-            record_from_bytes,
-        );
+        assert_eq!(record, record_from_bytes,);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_invalid() -> Result<(), std::io::Error> {
+        let key = IntKey { value: 7 };
+        let record = BTreeRecord {
+            child_lba: Some(0xDEADBEEFAAAABBBB),
+            data_lba: 0xFFEEFFEEFFEEFFEE,
+            key: key,
+        };
+
+        let invalid_record = BTreeRecord::<IntKey>::invalid();
+
+        assert_ne!(record, invalid_record);
 
         Ok(())
     }
