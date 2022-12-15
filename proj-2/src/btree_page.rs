@@ -60,6 +60,31 @@ impl<K: BTreeKey> BTreePage<K> {
     }
 }
 
+impl<K: BTreeKey> Drop for BTreePage<K> {
+    fn drop(&mut self) {
+        if self.dirty {
+            let mut device = self.device.borrow_mut();
+            
+            let mut bytes = vec![0u8; device.block_size as usize];
+            let mut off = 0 as usize;
+            let len = BTreeRecord::<K>::get_size() as usize;
+
+            for record in &self.records {
+                bytes[off..off + len].copy_from_slice(&record.to_bytes());
+                off += len;
+            }
+
+            // Fill rest with invalid records
+            while off + len <= device.block_size as usize {
+                bytes[off..off + len].copy_from_slice(&BTreeRecord::<K>::invalid().to_bytes());
+                off += len;
+            }
+
+            device.write(self.lba, &bytes).expect("Could not write into device on flush!");
+        }
+    }
+}
+
 mod tests {
     use crate::btree_key::IntKey;
     use crate::device::BlockDevice;
@@ -92,7 +117,7 @@ mod tests {
     #[test]
     fn test_new_one_record() -> Result<(), std::io::Error> {
         let block_size = 256;
-        let mut device = BlockDevice::new("test_new_empty.txt".to_string(), block_size, true).unwrap();
+        let mut device = BlockDevice::new("test_new_one_record.txt".to_string(), block_size, true).unwrap();
 
         let mut bytes = vec![0u8; block_size as usize];
         let mut off = 0 as usize;
