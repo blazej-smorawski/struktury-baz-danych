@@ -3,9 +3,9 @@ use byteorder::{ByteOrder, LittleEndian};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct BTreeRecord<K: BTreeKey> {
-    child_lba: Option<u64>,
-    data_lba: u64,
-    key: K,
+    pub child_lba: Option<u64>,
+    pub data_lba: u64,
+    pub key: K,
 }
 
 impl<K: BTreeKey> BTreeRecord<K> {

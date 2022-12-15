@@ -3,6 +3,7 @@ pub mod record;
 pub mod btree;
 pub mod btree_key;
 pub mod btree_record;
+pub mod btree_page;
 
 use std::vec;
 
