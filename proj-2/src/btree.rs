@@ -14,8 +14,10 @@ pub struct BTree<K: BTreeKey, T: Record> {
     pub data_device: Rc<RefCell<BlockDevice>>,
     pub index_root: Page<BTreeRecord<K>>,
     pub working_page: Option<Page<BTreeRecord<K>>>,
+    pub helper_page: Option<Page<BTreeRecord<K>>>,
     pub loaded_data: Vec<T>,
     pub degree: u64,
+    pub pages_count: u64,
 }
 
 impl<K: BTreeKey, T: Record> BTree<K, T> {
@@ -30,13 +32,18 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         let btree = BTree {
             index_device: index_device.clone(),
             data_device: data_device.clone(),
-            index_root: Page::new(&index_device.clone(), 0, 0),
+            index_root: Page::new(&index_device.clone(), 0, u64::max_value()),
             working_page: None,
+            helper_page: None,
             loaded_data: vec![],
             degree: degree,
+            pages_count: 1,
         };
 
-        println!("BTree:\n\t- degree: {}\n\t- index block size: {}\n\t- record size: {}", degree, block_size, record_size);
+        println!(
+            "BTree:\n\t- degree: {}\n\t- index block size: {}\n\t- record size: {}",
+            degree, block_size, record_size
+        );
 
         btree
     }
@@ -73,25 +80,92 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 /*
                  * No records left to analyze
                  */
-                break
+                break;
             }
         }
         /*
          * We did not find anything
          */
-        return false;
+        false
+    }
+
+    fn get_next_index_lba(&mut self) -> u64 {
+        let ret = self.pages_count;
+        self.pages_count += 1;
+        ret
+    }
+
+    fn split_child(
+        mut parent: &mut Page<BTreeRecord<K>>,
+        mut child: &mut Page<BTreeRecord<K>>,
+        mut new_child: &mut Page<BTreeRecord<K>>
+    ) {
+
+        let centre_index = child.records.len() / 2;
+        let mut centre_record = child.records.remove(centre_index);
+
+        for _ in centre_index..child.records.len() {
+            new_child.records.push(child.records.remove(centre_index));
+        }
+
+        let child_record_index_option = parent
+            .records
+            .iter()
+            .position(|x| x.child_lba == Some(child.lba));
+        let child_record_index = match child_record_index_option {
+            Some(index) => index,
+            None => panic!("Tried to split `Page` that is not a child of `parent`"),
+        };
+
+        let new_page_last_record = BTreeRecord::<K> {
+            child_lba: centre_record.child_lba,
+            key: K::invalid(),
+            data_lba: 0,
+        };
+        new_child.records.push(Box::new(new_page_last_record));
+        centre_record.child_lba = Some(child.lba);
+        parent.records[child_record_index].child_lba = Some(new_child.lba);
+        parent.records.insert(child_record_index, centre_record);
+    }
+
+    pub fn insert(&mut self, key: K) -> bool {
+        if self.index_root.records.len() == 2 * self.degree as usize {
+            let lba = self.get_next_index_lba();
+            let mut working_page =
+                Page::<BTreeRecord<K>>::empty(&self.index_device.clone(), lba, 0);
+
+            /*
+             * This record will land into root after swap
+             */
+            working_page.records.push(Box::new(BTreeRecord::<K> {
+                child_lba: Some(lba),
+                key: K::invalid(),
+                data_lba: 0,
+            }));
+
+            std::mem::swap(&mut working_page.records, &mut self.index_root.records);
+
+            let mut new_page =
+                Page::<BTreeRecord<K>>::empty(&self.index_device.clone(), self.get_next_index_lba(), 0);
+            BTree::<K, T>::split_child(&mut self.index_root, &mut working_page, &mut new_page);
+            self.working_page = Some(working_page);
+        }
+
+        let mut page_option = Some(&self.index_root);
+
+        true
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{btree_key::IntKey, device, record::IntRecord};
+    use crate::{btree_key::IntKey, record::IntRecord};
 
     use super::*;
 
     #[test]
     fn test_search() -> Result<(), std::io::Error> {
-        let block_size = 21*4; // t = 2
+        let block_size = 21 * 4; // t = 2
 
         {
             let device = BlockDevice::new("test_search.hex".to_string(), block_size, true).unwrap();
@@ -149,14 +223,57 @@ mod tests {
         }
 
         let device = BlockDevice::new("test_search.hex".to_string(), block_size, false).unwrap();
-        let mut data_device = BlockDevice::new("test_search_data.hex".to_string(), block_size, false).unwrap();
+        let mut data_device =
+            BlockDevice::new("test_search_data.hex".to_string(), block_size, false).unwrap();
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
-        assert_eq!(btree.search(IntKey{value: 20}), true);
-        assert_eq!(btree.search(IntKey{value: 10}), true);
-        assert_eq!(btree.search(IntKey{value: 7}), true);
-        assert_eq!(btree.search(IntKey{value: 8}), false);
-        
+        assert_eq!(btree.search(IntKey { value: 20 }), true);
+        assert_eq!(btree.search(IntKey { value: 10 }), true);
+        assert_eq!(btree.search(IntKey { value: 7 }), true);
+        assert_eq!(btree.search(IntKey { value: 8 }), false);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_split() -> Result<(), std::io::Error> {
+        let block_size = 21 * 4; // t = 2
+
+        let device = BlockDevice::new("test_split.hex".to_string(), block_size, true).unwrap();
+        let device = Rc::new(RefCell::new(device));
+        let mut root_page = Page::<BTreeRecord<IntKey>>::new(&device.clone(), 0, 0);
+        let mut child_page = Page::<BTreeRecord<IntKey>>::new(&device.clone(), 1, 0);
+
+        let record1 = BTreeRecord::<IntKey> {
+            child_lba: Some(1),
+            key: IntKey::invalid(),
+            data_lba: 0,
+        };
+        root_page.records.push(Box::new(record1));
+
+        let record1 = BTreeRecord::<IntKey> {
+            child_lba: None,
+            key: IntKey { value: 4 },
+            data_lba: 0,
+        };
+        let record2 = BTreeRecord::<IntKey> {
+            child_lba: None,
+            key: IntKey { value: 7 },
+            data_lba: 0,
+        };
+        let record3 = BTreeRecord::<IntKey> {
+            child_lba: None,
+            key: IntKey { value: 10 },
+            data_lba: 0,
+        };
+        child_page.records.push(Box::new(record1));
+        child_page.records.push(Box::new(record2));
+        child_page.records.push(Box::new(record3));
+
+        let mut new_page =
+            Page::<BTreeRecord<IntKey>>::empty(&device.clone(), 2, 0);
+        BTree::<IntKey, IntRecord>::split_child(&mut root_page, &mut child_page, &mut new_page);
+
         Ok(())
     }
 }

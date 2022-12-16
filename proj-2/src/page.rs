@@ -23,23 +23,17 @@ impl<R: Bytes> Page<R> {
         };
 
         {
-            let mut device = page.device.borrow_mut();
+            let mut device = device.borrow_mut();
             let read_result = device.read(lba);
 
             let bytes = match read_result {
                 Ok(bytes) => bytes,
                 Err(_) => {
-                    // Fill buf the block with invalid records, ready to be overwritten
-                    let mut bytes = vec![0u8; device.block_size as usize];
-                    let mut off = 0 as usize;
-                    let len = R::get_size() as usize;
-                    while off + len <= device.block_size as usize {
-                        bytes[off..off + len].copy_from_slice(&R::invalid().to_bytes());
-                        off += len;
-                    }
-                    //device.write(lba, &bytes).expect("Failed to write new block into index device!");
+                    /*
+                     * The device will be filled with invalid records when the `Page` is dropped
+                     */
                     page.dirty = true;
-                    bytes
+                    return page
                 }
             };
 
@@ -54,6 +48,20 @@ impl<R: Bytes> Page<R> {
                 off += len;
             }
         }
+
+        page
+    }
+
+    pub fn empty(device: &Rc<RefCell<BlockDevice>>, lba: u64, parent_lba: u64) -> Self {
+        let mut page = Page::<R> {
+            device: Rc::clone(device),
+            records: Vec::<Box<R>>::new(),
+            dirty: false,
+            lba: lba,
+            parent_lba: parent_lba, 
+        };
+
+        page.dirty = true;
 
         page
     }
