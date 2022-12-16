@@ -71,14 +71,92 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 }
             } else {
                 /*
-                 * Should not happen!
+                 * No records left to analyze
                  */
-                panic!("No page to go into!")
+                break
             }
         }
         /*
          * We did not find anything
          */
         return false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{btree_key::IntKey, device, record::IntRecord};
+
+    use super::*;
+
+    #[test]
+    fn test_search() -> Result<(), std::io::Error> {
+        let block_size = 21*4; // t = 2
+
+        {
+            let device = BlockDevice::new("test_search.hex".to_string(), block_size, true).unwrap();
+            let device = Rc::new(RefCell::new(device));
+            let mut root_page = Page::<BTreeRecord<IntKey>>::new(&device.clone(), 0, 0);
+            let mut child1_page = Page::<BTreeRecord<IntKey>>::new(&device.clone(), 1, 0);
+            let mut child2_page = Page::<BTreeRecord<IntKey>>::new(&device.clone(), 2, 0);
+            //let child3_page = Page::<BTreeRecord<IntKey>>::new(&device.clone(), 0, 0);
+            //let child4_page = Page::<BTreeRecord<IntKey>>::new(&device.clone(), 0, 0);
+
+            let record1 = BTreeRecord::<IntKey> {
+                child_lba: Some(1),
+                key: IntKey { value: 10 },
+                data_lba: 0,
+            };
+            let record2 = BTreeRecord::<IntKey> {
+                child_lba: Some(2),
+                key: IntKey::invalid(),
+                data_lba: 0,
+            };
+            root_page.records.push(Box::new(record1));
+            root_page.records.push(Box::new(record2));
+
+            let record1 = BTreeRecord::<IntKey> {
+                child_lba: None,
+                key: IntKey { value: 4 },
+                data_lba: 0,
+            };
+            let record2 = BTreeRecord::<IntKey> {
+                child_lba: None,
+                key: IntKey { value: 7 },
+                data_lba: 0,
+            };
+            child1_page.records.push(Box::new(record1));
+            child1_page.records.push(Box::new(record2));
+
+            let record1 = BTreeRecord::<IntKey> {
+                child_lba: None,
+                key: IntKey { value: 12 },
+                data_lba: 0,
+            };
+            let record2 = BTreeRecord::<IntKey> {
+                child_lba: None,
+                key: IntKey { value: 20 },
+                data_lba: 0,
+            };
+            let record3 = BTreeRecord::<IntKey> {
+                child_lba: None,
+                key: IntKey::invalid(),
+                data_lba: 0,
+            };
+            child2_page.records.push(Box::new(record1));
+            child2_page.records.push(Box::new(record2));
+            child2_page.records.push(Box::new(record3));
+        }
+
+        let device = BlockDevice::new("test_search.hex".to_string(), block_size, false).unwrap();
+        let mut data_device = BlockDevice::new("test_search_data.hex".to_string(), block_size, false).unwrap();
+        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+
+        assert_eq!(btree.search(IntKey{value: 20}), true);
+        assert_eq!(btree.search(IntKey{value: 10}), true);
+        assert_eq!(btree.search(IntKey{value: 7}), true);
+        assert_eq!(btree.search(IntKey{value: 8}), false);
+        
+        Ok(())
     }
 }

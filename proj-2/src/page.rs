@@ -12,11 +12,11 @@ pub struct Page<K: Bytes> {
     pub parent_lba: u64,
 }
 
-impl<K: Bytes> Page<K> {
+impl<R: Bytes> Page<R> {
     pub fn new(device: &Rc<RefCell<BlockDevice>>, lba: u64, parent_lba: u64) -> Self {
-        let mut page = Page::<K> {
+        let mut page = Page::<R> {
             device: Rc::clone(device),
-            records: Vec::<Box<K>>::new(),
+            records: Vec::<Box<R>>::new(),
             dirty: false,
             lba: lba,
             parent_lba: parent_lba, 
@@ -32,9 +32,9 @@ impl<K: Bytes> Page<K> {
                     // Fill buf the block with invalid records, ready to be overwritten
                     let mut bytes = vec![0u8; device.block_size as usize];
                     let mut off = 0 as usize;
-                    let len = K::get_size() as usize;
+                    let len = R::get_size() as usize;
                     while off + len <= device.block_size as usize {
-                        bytes[off..off + len].copy_from_slice(&K::invalid().to_bytes());
+                        bytes[off..off + len].copy_from_slice(&R::invalid().to_bytes());
                         off += len;
                     }
                     //device.write(lba, &bytes).expect("Failed to write new block into index device!");
@@ -44,10 +44,10 @@ impl<K: Bytes> Page<K> {
             };
 
             let mut off = 0 as usize;
-            let len = K::get_size() as usize;
+            let len = R::get_size() as usize;
             while off + len <= bytes.len() {
-                let record = K::from_bytes(&bytes[off..off + len]);
-                if record == K::invalid() {
+                let record = R::from_bytes(&bytes[off..off + len]);
+                if record == R::invalid() {
                     break;
                 }
                 page.records.push(Box::new(record));
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn test_new_empty() -> Result<(), std::io::Error> {
         let block_size = 256;
-        let mut device = BlockDevice::new("test_new_empty.txt".to_string(), block_size, true).unwrap();
+        let mut device = BlockDevice::new("test_new_empty.hex".to_string(), block_size, true).unwrap();
 
         let mut bytes = vec![0u8; block_size as usize];
         let mut off = 0 as usize;
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn test_new_one_record() -> Result<(), std::io::Error> {
         let block_size = 256;
-        let mut device = BlockDevice::new("test_new_one_record.txt".to_string(), block_size, true).unwrap();
+        let mut device = BlockDevice::new("test_new_one_record.hex".to_string(), block_size, true).unwrap();
 
         let mut bytes = vec![0u8; block_size as usize];
         let mut off = 0 as usize;
