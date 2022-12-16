@@ -137,4 +137,20 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_partially_invalid() -> Result<(), std::io::Error> {
+        let key = IntKey::invalid();
+        let record = BTreeRecord {
+            child_lba: Some(0xDEADBEEFAAAABBBB),
+            data_lba: 0,
+            key: key,
+        };
+
+        let invalid_record = BTreeRecord::<IntKey>::invalid();
+
+        assert_ne!(record, invalid_record);
+
+        Ok(())
+    }
 }
