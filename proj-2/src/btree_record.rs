@@ -1,4 +1,4 @@
-use crate::btree_key::BTreeKey;
+use crate::{btree_key::BTreeKey, bytes::Bytes};
 use byteorder::{ByteOrder, LittleEndian};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -8,8 +8,8 @@ pub struct BTreeRecord<K: BTreeKey> {
     pub key: K,
 }
 
-impl<K: BTreeKey> BTreeRecord<K> {
-    pub fn invalid() -> Self {
+impl<K: BTreeKey> Bytes for BTreeRecord<K> {
+    fn invalid() -> Self {
         BTreeRecord::<K> {
             child_lba: None,
             key: K::invalid(),
@@ -17,7 +17,7 @@ impl<K: BTreeKey> BTreeRecord<K> {
         }
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Self {
+    fn from_bytes(bytes: &[u8]) -> Self {
         let mut record = BTreeRecord::<K> {
             child_lba: None,
             key: K::from_bytes(&bytes[17..].to_vec()),
@@ -31,7 +31,7 @@ impl<K: BTreeKey> BTreeRecord<K> {
         record
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = vec![0u8; Self::get_size() as usize];
 
         if let Some(child_lba) = self.child_lba {
@@ -48,7 +48,7 @@ impl<K: BTreeKey> BTreeRecord<K> {
         bytes
     }
 
-    pub fn get_size() -> u64 {
+    fn get_size() -> u64 {
         1 + (2 * std::mem::size_of::<u64>()) as u64 + K::get_size()
     }
 }

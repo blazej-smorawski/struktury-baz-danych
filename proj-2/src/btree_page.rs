@@ -1,23 +1,22 @@
 use std::cell::RefCell;
 use std::{rc::Rc};
 
+use crate::bytes::Bytes;
 use crate::device::BlockDevice;
 
-use crate::{btree_record::BTreeRecord, btree_key::BTreeKey, record::Record};
-
-pub struct BTreePage<K: BTreeKey> {
+pub struct Page<K: Bytes> {
     device: Rc<RefCell<BlockDevice>>,
-    pub records: Vec<BTreeRecord<K>>,
+    pub records: Vec<Box<K>>,
     pub dirty: bool,
     pub lba: u64,
     pub parent_lba: u64,
 }
 
-impl<K: BTreeKey> BTreePage<K> {
+impl<K: Bytes> Page<K> {
     pub fn new(device: &Rc<RefCell<BlockDevice>>, lba: u64, parent_lba: u64) -> Self {
-        let mut page = BTreePage::<K> {
+        let mut page = Page::<K> {
             device: Rc::clone(device),
-            records: Vec::<BTreeRecord<K>>::new(),
+            records: Vec::<Box<K>>::new(),
             dirty: false,
             lba: lba,
             parent_lba: parent_lba, 
@@ -33,9 +32,9 @@ impl<K: BTreeKey> BTreePage<K> {
                     // Fill buf the block with invalid records, ready to be overwritten
                     let mut bytes = vec![0u8; device.block_size as usize];
                     let mut off = 0 as usize;
-                    let len = BTreeRecord::<K>::get_size() as usize;
+                    let len = K::get_size() as usize;
                     while off + len <= device.block_size as usize {
-                        bytes[off..off + len].copy_from_slice(&BTreeRecord::<K>::invalid().to_bytes());
+                        bytes[off..off + len].copy_from_slice(&K::invalid().to_bytes());
                         off += len;
                     }
                     //device.write(lba, &bytes).expect("Failed to write new block into index device!");
@@ -45,13 +44,13 @@ impl<K: BTreeKey> BTreePage<K> {
             };
 
             let mut off = 0 as usize;
-            let len = BTreeRecord::<K>::get_size() as usize;
+            let len = K::get_size() as usize;
             while off + len <= bytes.len() {
-                let record = BTreeRecord::<K>::from_bytes(&bytes[off..off + len]);
-                if record == BTreeRecord::<K>::invalid() {
+                let record = K::from_bytes(&bytes[off..off + len]);
+                if record == K::invalid() {
                     break;
                 }
-                page.records.push(record);
+                page.records.push(Box::new(record));
                 off += len;
             }
         }
@@ -60,14 +59,14 @@ impl<K: BTreeKey> BTreePage<K> {
     }
 }
 
-impl<K: BTreeKey> Drop for BTreePage<K> {
+impl<K: Bytes> Drop for Page<K> {
     fn drop(&mut self) {
         if self.dirty {
             let mut device = self.device.borrow_mut();
             
             let mut bytes = vec![0u8; device.block_size as usize];
             let mut off = 0 as usize;
-            let len = BTreeRecord::<K>::get_size() as usize;
+            let len = K::get_size() as usize;
 
             for record in &self.records {
                 bytes[off..off + len].copy_from_slice(&record.to_bytes());
@@ -76,7 +75,7 @@ impl<K: BTreeKey> Drop for BTreePage<K> {
 
             // Fill rest with invalid records
             while off + len <= device.block_size as usize {
-                bytes[off..off + len].copy_from_slice(&BTreeRecord::<K>::invalid().to_bytes());
+                bytes[off..off + len].copy_from_slice(&K::invalid().to_bytes());
                 off += len;
             }
 
@@ -85,8 +84,10 @@ impl<K: BTreeKey> Drop for BTreePage<K> {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use crate::btree_key::IntKey;
+    use crate::{btree_record::BTreeRecord};
     use crate::device::BlockDevice;
     
     use super::*;
@@ -107,9 +108,9 @@ mod tests {
         device.write(0, &bytes).unwrap();
         let device = Rc::new(RefCell::new(device));
 
-        let page = BTreePage::<IntKey>::new(&device, 0, 0);
+        let page = Page::<BTreeRecord<IntKey>>::new(&device, 0, 0);
 
-        assert_eq!(page.records, Vec::<BTreeRecord<IntKey>>::new());
+        assert_eq!(page.records, Vec::<Box<BTreeRecord<IntKey>>>::new());
 
         Ok(())
     }
@@ -138,12 +139,12 @@ mod tests {
         device.write(0, &bytes).unwrap();
         let device = Rc::new(RefCell::new(device));
 
-        let page = BTreePage::<IntKey>::new(&device, 0, 0);
+        let page = Page::<BTreeRecord<IntKey>>::new(&device, 0, 0);
 
-        let mut expected_records = Vec::<BTreeRecord<IntKey>>::new();
-        expected_records.push(record);
+        let mut expected_records = Vec::<Box<BTreeRecord<IntKey>>>::new();
+        expected_records.push(Box::new(record));
 
-        assert_ne!(page.records, Vec::<BTreeRecord<IntKey>>::new());
+        assert_ne!(page.records, Vec::<Box<BTreeRecord<IntKey>>>::new());
         assert_eq!(page.records, expected_records);
 
         Ok(())
