@@ -1,11 +1,10 @@
 pub mod device;
 pub mod record;
+pub mod bytes;
 pub mod btree;
 pub mod btree_key;
 pub mod btree_record;
 pub mod btree_page;
-
-use std::vec;
 
 use crate::{device::BlockDevice, btree::{BTree}, record::IntRecord, btree_key::IntKey};
 

@@ -165,7 +165,7 @@ mod tests {
         bytes[6] = 0;
         bytes[7] = 0;
 
-        let mut record = IntRecord::from_bytes(bytes)?;
+        let record = IntRecord::from_bytes(bytes)?;
 
         assert_eq!(
             record.numbers,

@@ -35,10 +35,10 @@ impl BlockDevice {
         let mut buf = vec![0u8; self.block_size as usize];
         self.file.seek(SeekFrom::Start(lba * self.block_size))?;
         self.file.read_exact(&mut buf)?;
-        Ok((buf))
+        Ok(buf)
     }
 
-    pub fn read(&mut self, lba: u64) -> Result<(Vec<u8>), std::io::Error> {
+    pub fn read(&mut self, lba: u64) -> Result<Vec<u8>, std::io::Error> {
         self.reads += 1;
         self.read_internal(lba)
     }
