@@ -61,9 +61,9 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(child) = self.child_lba {
-            write!(f, "{}.{:<4}", self.key, child)
+            write!(f, "{}.{:<2}", self.key, child)
         } else {
-            write!(f, "{}.{:<4}", self.key, "*")
+            write!(f, "{}.{:<2}", self.key, "*")
         }
     }
 }

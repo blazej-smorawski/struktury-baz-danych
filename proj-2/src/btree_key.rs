@@ -49,9 +49,9 @@ impl BTreeKey for IntKey {
 impl Display for IntKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.value != i32::min_value() {
-            write!(f, "{:>4}", self.value)
+            write!(f, "{:>2}", self.value)
         } else {
-            write!(f, "{:>4}", "*")
+            write!(f, "{:>2}", "*")
         }
     }
 }

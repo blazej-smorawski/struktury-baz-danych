@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::{rc::Rc};
 
 use crate::bytes::Bytes;
-use crate::device::BlockDevice;
+use crate::device::{BlockDevice, self};
 
 pub struct Page<K: Bytes> {
     device: Rc<RefCell<BlockDevice>>,
@@ -14,6 +14,11 @@ pub struct Page<K: Bytes> {
 
 impl<R: Bytes> Page<R> {
     pub fn new(device: Rc<RefCell<BlockDevice>>, lba: u64, parent_lba: u64) -> Self {
+        let device_mut = device.clone();
+        let mut device_mut = device_mut.borrow_mut();
+
+        //println!("Open at: {}", lba);
+
         let mut page = Page::<R> {
             device: device,
             records: Vec::<Box<R>>::new(),
@@ -23,8 +28,7 @@ impl<R: Bytes> Page<R> {
         };
 
         {
-            let mut device = device.borrow_mut();
-            let read_result = device.read(lba);
+            let read_result = device_mut.read(lba);
 
             let bytes = match read_result {
                 Ok(bytes) => bytes,
@@ -69,7 +73,9 @@ impl<R: Bytes> Page<R> {
 
 impl<K: Bytes> Drop for Page<K> {
     fn drop(&mut self) {
+        //println!("Drop: {}", self.lba);
         if self.dirty {
+            //println!("Flush: {}", self.lba);
             let mut device = self.device.borrow_mut();
             
             let mut bytes = vec![0u8; device.block_size as usize];
@@ -116,7 +122,7 @@ mod tests {
         device.write(0, &bytes).unwrap();
         let device = Rc::new(RefCell::new(device));
 
-        let page = Page::<BTreeRecord<IntKey>>::new(&device, 0, 0);
+        let page = Page::<BTreeRecord<IntKey>>::new(device, 0, 0);
 
         assert_eq!(page.records, Vec::<Box<BTreeRecord<IntKey>>>::new());
 
@@ -147,7 +153,7 @@ mod tests {
         device.write(0, &bytes).unwrap();
         let device = Rc::new(RefCell::new(device));
 
-        let page = Page::<BTreeRecord<IntKey>>::new(&device, 0, 0);
+        let page = Page::<BTreeRecord<IntKey>>::new(device, 0, 0);
 
         let mut expected_records = Vec::<Box<BTreeRecord<IntKey>>>::new();
         expected_records.push(Box::new(record));
