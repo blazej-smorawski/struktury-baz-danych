@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{btree_key::BTreeKey, bytes::Bytes};
 use byteorder::{ByteOrder, LittleEndian};
 
@@ -50,6 +52,19 @@ impl<K: BTreeKey> Bytes for BTreeRecord<K> {
 
     fn get_size() -> u64 {
         1 + (2 * std::mem::size_of::<u64>()) as u64 + K::get_size()
+    }
+}
+
+impl<K: BTreeKey> Display for BTreeRecord<K>
+where
+    K: Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(child) = self.child_lba {
+            write!(f, "{}.{:<4}", self.key, child)
+        } else {
+            write!(f, "{}.{:<4}", self.key, "*")
+        }
     }
 }
 

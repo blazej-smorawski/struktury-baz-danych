@@ -1,6 +1,7 @@
 use byteorder::{LittleEndian, ByteOrder};
+use std::fmt::{Debug, Display};
 
-pub trait BTreeKey: Ord + Copy {
+pub trait BTreeKey: Ord + Copy + Debug + Display {
     fn is_valid(&self) -> bool;
     fn invalidate(&mut self);
     fn to_bytes(&self) -> Vec<u8>;
@@ -45,6 +46,15 @@ impl BTreeKey for IntKey {
     }
 }
 
+impl Display for IntKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.value != i32::min_value() {
+            write!(f, "{:>4}", self.value)
+        } else {
+            write!(f, "{:>4}", "*")
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

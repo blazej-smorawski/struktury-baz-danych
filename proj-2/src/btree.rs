@@ -98,9 +98,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
     fn split_child(
         mut parent: &mut Page<BTreeRecord<K>>,
         mut child: &mut Page<BTreeRecord<K>>,
-        mut new_child: &mut Page<BTreeRecord<K>>
+        mut new_child: &mut Page<BTreeRecord<K>>,
     ) {
-
         let centre_index = child.records.len() / 2;
         let mut centre_record = child.records.remove(centre_index);
 
@@ -129,7 +128,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
     }
 
     pub fn insert(&mut self, key: K) -> bool {
-        if self.index_root.records.len() == 2 * self.degree as usize {
+        if self.index_root.records.iter().filter(|x| x.key != K::invalid()).count() == (2 * self.degree - 1) as usize{
             let lba = self.get_next_index_lba();
             let mut working_page =
                 Page::<BTreeRecord<K>>::empty(&self.index_device.clone(), lba, 0);
@@ -145,15 +144,104 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
             std::mem::swap(&mut working_page.records, &mut self.index_root.records);
 
-            let mut new_page =
-                Page::<BTreeRecord<K>>::empty(&self.index_device.clone(), self.get_next_index_lba(), 0);
+            let mut new_page = Page::<BTreeRecord<K>>::empty(
+                &self.index_device.clone(),
+                self.get_next_index_lba(),
+                0,
+            );
             BTree::<K, T>::split_child(&mut self.index_root, &mut working_page, &mut new_page);
             self.working_page = Some(working_page);
         }
 
-        let mut page_option = Some(&self.index_root);
+        let mut page = &mut self.index_root;
+        loop {
+            if page.records.is_empty() {
+                page.records.push(Box::new(BTreeRecord::<K> {
+                    child_lba: None,
+                    key: key,
+                    data_lba: 0,
+                }));
+                page.dirty = true;
+                break;
+            } else if page.records[0].child_lba == None {
+                let insert_index = page
+                    .records
+                    .iter()
+                    .position(|x| x.key == K::invalid() || x.key >= key)
+                    .unwrap_or(page.records.len());
+
+                page.records.insert(insert_index, Box::new(BTreeRecord::<K> {
+                    child_lba: None,
+                    key: key,
+                    data_lba: 0,
+                }));
+                page.dirty = true;
+                break;
+            } else {
+                /*
+                 * Non-leaf page
+                 */
+                let next_search_index = page
+                    .records
+                    .iter()
+                    .position(|x| x.key == K::invalid() || x.key > key)
+                    .expect("Could not find proper position for further search");
+
+                let next_lba = page.records[next_search_index].child_lba.expect("Tried to enter leafs child!");
+
+                self.working_page = Some(Page::<BTreeRecord<K>>::new(
+                    &self.index_device.clone(),
+                    next_lba,
+                    0,
+                ));
+                page = self.working_page.as_mut().unwrap();
+            }
+        }
 
         true
+    }
+
+    pub fn print(&mut self) {
+        let mut tree = Vec::<Vec::<Page::<BTreeRecord<K>>>>::new();
+        let root = Page::<BTreeRecord<K>>::new(&self.index_device, 0, u64::max_value());
+
+        tree.push(vec![root]);
+        let mut level = &tree[0];
+        loop {
+            let mut next_level = vec![];
+            for page in level {
+                for record in &page.records {
+                    if let Some(child) = record.child_lba {
+                        let new_page = Page::<BTreeRecord<K>>::new(&self.index_device, child, page.lba);
+                        next_level.push(new_page);
+                    }
+                }
+            }
+
+            if next_level.is_empty() {
+                break;
+            } else {
+                tree.push(next_level);
+                level = &tree.last().unwrap();
+            }
+        }
+
+        for level in tree {
+            for page in level {
+                let mut count = 0;
+                print!("[");
+                for record in &page.records {
+                    print!("{}", record);
+                    count += 1;
+                }
+                while count<self.degree*2 {
+                    print!("{}", BTreeRecord::<K>::invalid());
+                    count += 1;
+                }
+                print!("]");
+            }
+            print!("\n\n");
+        }
     }
 }
 
@@ -270,9 +358,41 @@ mod tests {
         child_page.records.push(Box::new(record2));
         child_page.records.push(Box::new(record3));
 
-        let mut new_page =
-            Page::<BTreeRecord<IntKey>>::empty(&device.clone(), 2, 0);
+        let mut new_page = Page::<BTreeRecord<IntKey>>::empty(&device.clone(), 2, 0);
         BTree::<IntKey, IntRecord>::split_child(&mut root_page, &mut child_page, &mut new_page);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert() -> Result<(), std::io::Error> {
+        let block_size = 21 * 4; // t = 2
+
+        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+
+        {
+            let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+
+            btree.insert(IntKey{value: 10});
+            assert_eq!(btree.search(IntKey{value: 10}), true);
+            assert_eq!(btree.search(IntKey{value: 11}), false);
+
+            btree.insert(IntKey{value: 11});
+            btree.insert(IntKey{value: 12});
+            btree.insert(IntKey{value: 13});
+            // assert_eq!(btree.search(IntKey{value: 10}), true);
+            // assert_eq!(btree.search(IntKey{value: 11}), true);
+            // assert_eq!(btree.search(IntKey{value: 12}), true);
+            // assert_eq!(btree.search(IntKey{value: 13}), true);
+            // assert_eq!(btree.search(IntKey{value: 14}), false);
+            btree.insert(IntKey{value: 14});
+        }
+
+        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, false).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        btree.print();
 
         Ok(())
     }
