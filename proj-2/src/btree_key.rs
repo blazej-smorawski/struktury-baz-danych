@@ -1,4 +1,4 @@
-use byteorder::{LittleEndian, ByteOrder};
+use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{Debug, Display};
 
 pub trait BTreeKey: Ord + Copy + Debug + Display {
@@ -13,12 +13,12 @@ pub trait BTreeKey: Ord + Copy + Debug + Display {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct IntKey {
-    pub value: i32
+    pub value: i32,
 }
 
 impl BTreeKey for IntKey {
     fn is_valid(&self) -> bool {
-        return self.value == i32::min_value()
+        return self.value == i32::min_value();
     }
 
     fn invalidate(&mut self) {
@@ -31,13 +31,15 @@ impl BTreeKey for IntKey {
         buf
     }
 
-    fn invalid() -> Self{
-        IntKey {value: i32::min_value()}
+    fn invalid() -> Self {
+        IntKey {
+            value: i32::min_value(),
+        }
     }
 
     fn from_bytes(bytes: &[u8]) -> Self {
         IntKey {
-            value: LittleEndian::read_i32(bytes)
+            value: LittleEndian::read_i32(bytes),
         }
     }
 
@@ -49,9 +51,9 @@ impl BTreeKey for IntKey {
 impl Display for IntKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.value != i32::min_value() {
-            write!(f, "{:>2}", self.value)
+            write!(f, "{:<2}", format!("{}", self.value))
         } else {
-            write!(f, "{:>2}", "*")
+            write!(f, "{:<2}", "*")
         }
     }
 }
@@ -61,25 +63,19 @@ mod tests {
 
     #[test]
     fn test_to_bytes() -> Result<(), std::io::Error> {
-        let key = IntKey {value:7};
+        let key = IntKey { value: 7 };
 
-        assert_eq!(
-            key.to_bytes(),
-            [7u8, 0, 0, 0]
-        );
+        assert_eq!(key.to_bytes(), [7u8, 0, 0, 0]);
         Ok(())
     }
 
     #[test]
     fn test_from_bytes() -> Result<(), std::io::Error> {
-        let bytes: Vec<u8> = vec![7u8, 0 , 0, 0];
+        let bytes: Vec<u8> = vec![7u8, 0, 0, 0];
 
         let key = IntKey::from_bytes(&bytes);
 
-        assert_eq!(
-            key.value,
-            7
-        );
+        assert_eq!(key.value, 7);
         Ok(())
     }
 }

@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use crate::{btree_key::BTreeKey, bytes::Bytes};
 use byteorder::{ByteOrder, LittleEndian};
+use colored::Colorize;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct BTreeRecord<K: BTreeKey> {
@@ -61,9 +62,19 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(child) = self.child_lba {
-            write!(f, "{}.{:<2}", self.key, child)
+            write!(
+                f,
+                "{:>2}.{}",
+                format!("{}", child),
+                format!("{}", self.key),
+            )
         } else {
-            write!(f, "{}.{:<2}", self.key, "*")
+            write!(
+                f,
+                "{:>2}.{}",
+                "*",
+                format!("{}", self.key),
+            )
         }
     }
 }

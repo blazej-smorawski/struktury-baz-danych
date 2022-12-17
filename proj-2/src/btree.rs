@@ -250,20 +250,29 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             }
         }
 
+        let width = 34;
+        let max_width = width * tree.last().unwrap().len();
+
         for level in tree {
+            let pages_count = level.len();
             for page in level {
                 let page = page.borrow();
                 let mut count = 0;
-                print!("-{:^4}-[", page.lba);
+
+                let mut page_format = format!("{:>3}>[", page.lba);
                 for record in &page.records {
-                    print!("{}", record);
+                    let record_format = format!("{:^5},", format!("{}", record));
+                    page_format = format!("{}{}",page_format, record_format);
                     count += 1;
                 }
                 while count<self.degree*2 {
-                    print!("{}", BTreeRecord::<K>::invalid());
+                    let record_format = format!("{},", BTreeRecord::<K>::invalid());
+                    page_format = format!("{}{}",page_format,record_format);
                     count += 1;
                 }
-                print!("]");
+                let row_width = max_width/pages_count;
+                page_format = format!("{}]",page_format);
+                print!("{}", format!("{:^row_width$}", page_format));
             }
             print!("\n\n");
         }
@@ -272,6 +281,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
 #[cfg(test)]
 mod tests {
+    use rand::{seq::SliceRandom, thread_rng};
+
     use crate::{btree_key::IntKey, record::IntRecord};
 
     use super::*;
@@ -443,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert() -> Result<(), std::io::Error> {
+    fn test_insert_random() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
@@ -451,28 +462,91 @@ mod tests {
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
-        btree.insert(IntKey{value: 10});
-        btree.print();
-        assert_eq!(btree.search(IntKey{value: 10}), true);
-        assert_eq!(btree.search(IntKey{value: 11}), false);
+        let mut keys: Vec<i32> = (1..100).collect();
+        keys.shuffle(&mut thread_rng());
+        for key in &keys {
+            btree.insert(IntKey{value: *key});
+        }
 
-        btree.insert(IntKey{value: 11});
+        for key in &keys {
+            assert_eq!(btree.search(IntKey{value: *key}), true);
+        }
+
         btree.print();
-        btree.insert(IntKey{value: 12});
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_increasing() -> Result<(), std::io::Error> {
+        let block_size = 21 * 4; // t = 2
+
+        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+
+        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+
+        let keys: Vec<i32> = (1..100).collect();
+
+        for key in &keys {
+            btree.insert(IntKey{value: *key});
+        }
+
+        for key in &keys {
+            assert_eq!(btree.search(IntKey{value: *key}), true);
+        }
+
         btree.print();
-        btree.insert(IntKey{value: 13});
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_decreasing() -> Result<(), std::io::Error> {
+        let block_size = 21 * 4; // t = 2
+
+        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+
+        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+
+        let mut keys: Vec<i32> = (1..100).collect();
+        keys.reverse();
+
+        for key in &keys {
+            btree.insert(IntKey{value: *key});
+        }
+
+        for key in &keys {
+            assert_eq!(btree.search(IntKey{value: *key}), true);
+        }
+
         btree.print();
-        btree.insert(IntKey{value: 14});
-        btree.print();
-        btree.insert(IntKey{value: 16});
-        btree.print();
-        btree.insert(IntKey{value: 17});
-        btree.print();
-        btree.insert(IntKey{value: 18});
-        btree.print();
-        btree.insert(IntKey{value: 19});
-        btree.print();
-        btree.insert(IntKey{value: 20});
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_small_random() -> Result<(), std::io::Error> {
+        let block_size = 21 * 4; // t = 2
+
+        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+
+        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+
+        let mut keys: Vec<i32> = (1..20).collect();
+        keys.reverse();
+        keys.shuffle(&mut thread_rng());
+
+        for key in &keys {
+            btree.insert(IntKey{value: *key});
+        }
+
+        for key in &keys {
+            assert_eq!(btree.search(IntKey{value: *key}), true);
+        }
+
         btree.print();
 
         Ok(())
