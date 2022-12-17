@@ -13,9 +13,9 @@ pub struct Page<K: Bytes> {
 }
 
 impl<R: Bytes> Page<R> {
-    pub fn new(device: &Rc<RefCell<BlockDevice>>, lba: u64, parent_lba: u64) -> Self {
+    pub fn new(device: Rc<RefCell<BlockDevice>>, lba: u64, parent_lba: u64) -> Self {
         let mut page = Page::<R> {
-            device: Rc::clone(device),
+            device: device,
             records: Vec::<Box<R>>::new(),
             dirty: false,
             lba: lba,

@@ -1,4 +1,6 @@
 use std::{cell::RefCell, rc::Rc, vec};
+use std::num::NonZeroUsize;
+use lru::LruCache;
 
 use crate::{
     btree_key::{BTreeKey, IntKey},
@@ -12,12 +14,10 @@ use crate::{
 pub struct BTree<K: BTreeKey, T: Record> {
     pub index_device: Rc<RefCell<BlockDevice>>,
     pub data_device: Rc<RefCell<BlockDevice>>,
-    pub index_root: Page<BTreeRecord<K>>,
-    pub working_page: Option<Page<BTreeRecord<K>>>,
-    pub helper_page: Option<Page<BTreeRecord<K>>>,
     pub loaded_data: Vec<T>,
     pub degree: u64,
     pub pages_count: u64,
+    cache: LruCache<u64 ,Page<BTreeRecord<K>>>,
 }
 
 impl<K: BTreeKey, T: Record> BTree<K, T> {
@@ -32,12 +32,10 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         let btree = BTree {
             index_device: index_device.clone(),
             data_device: data_device.clone(),
-            index_root: Page::new(&index_device.clone(), 0, u64::max_value()),
-            working_page: None,
-            helper_page: None,
             loaded_data: vec![],
             degree: degree,
             pages_count: 1,
+            cache: LruCache::new(NonZeroUsize::new(4).unwrap()),
         };
 
         println!(
@@ -48,8 +46,15 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         btree
     }
 
+    fn get_page(cache :&mut LruCache<u64, Page<BTreeRecord<K>>>, device: Rc<RefCell<BlockDevice>>, lba: u64, parent: u64) -> &mut Page<BTreeRecord<K>> {
+        cache.get_or_insert_mut(lba, || Page::<BTreeRecord<K>>::new(device.clone(), lba, parent))
+    }
+
     fn search(&mut self, key: K) -> bool {
-        let mut page_option = Some(&self.index_root);
+        let mut page_option = Option::<&mut Page::<BTreeRecord<K>>>::None;
+        {
+            page_option = Some(Self::get_page(&mut self.cache, self.index_device,0, u64::max_value()));
+        }
 
         while let Some(page) = page_option {
             let records = &page.records;
@@ -67,12 +72,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
                 match record.child_lba {
                     Some(lba) => {
-                        self.working_page = Some(Page::<BTreeRecord<K>>::new(
-                            &self.index_device.clone(),
-                            lba,
-                            page.lba,
-                        ));
-                        page_option = self.working_page.as_ref();
+                        page_option = Some(Self::get_page(&mut self.cache, self.index_device, lba, page.lba))
                     }
                     None => page_option = None,
                 }
@@ -128,10 +128,11 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
     }
 
     pub fn insert(&mut self, key: K) -> bool {
-        if self.index_root.records.iter().filter(|x| x.key != K::invalid()).count() == (2 * self.degree - 1) as usize{
-            let lba = self.get_next_index_lba();
-            let mut working_page =
-                Page::<BTreeRecord<K>>::empty(&self.index_device.clone(), lba, 0);
+        let root = Self::get_page(&mut self.cache, self.index_device.clone() ,0, u64::max_value());
+        if root.records.iter().filter(|x| x.key != K::invalid()).count() == (2 * self.degree - 1) as usize{
+            let lba = self.pages_count;
+            self.pages_count += 1;
+            let mut working_page = Self::get_page(&mut self.cache, self.index_device.clone(), lba, 0);
 
             /*
              * This record will land into root after swap
@@ -142,18 +143,13 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 data_lba: 0,
             }));
 
-            std::mem::swap(&mut working_page.records, &mut self.index_root.records);
+            std::mem::swap(&mut working_page.records, &mut root.records);
 
-            let mut new_page = Page::<BTreeRecord<K>>::empty(
-                &self.index_device.clone(),
-                self.get_next_index_lba(),
-                0,
-            );
-            BTree::<K, T>::split_child(&mut self.index_root, &mut working_page, &mut new_page);
-            self.working_page = Some(working_page);
+            let mut new_page = Self::get_page(&mut self.cache, self.index_device.clone(), self.get_next_index_lba(), 0);
+            BTree::<K, T>::split_child(root, working_page, &mut new_page);
         }
 
-        let mut page = &mut self.index_root;
+        let mut page = Self::get_page(&mut self.cache, self.index_device.clone(),0, u64::max_value());
         loop {
             if page.records.is_empty() {
                 page.records.push(Box::new(BTreeRecord::<K> {
@@ -189,12 +185,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
                 let next_lba = page.records[next_search_index].child_lba.expect("Tried to enter leafs child!");
 
-                self.working_page = Some(Page::<BTreeRecord<K>>::new(
-                    &self.index_device.clone(),
-                    next_lba,
-                    0,
-                ));
-                page = self.working_page.as_mut().unwrap();
+                let parent_lba = page.lba;
+                page = Self::get_page(&mut self.cache, self.index_device.clone(), next_lba, parent_lba);
             }
         }
 
@@ -203,7 +195,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
     pub fn print(&mut self) {
         let mut tree = Vec::<Vec::<Page::<BTreeRecord<K>>>>::new();
-        let root = Page::<BTreeRecord<K>>::new(&self.index_device, 0, u64::max_value());
+        let root = Page::<BTreeRecord<K>>::new(self.index_device.clone(), 0, u64::max_value());
 
         tree.push(vec![root]);
         let mut level = &tree[0];
@@ -212,7 +204,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             for page in level {
                 for record in &page.records {
                     if let Some(child) = record.child_lba {
-                        let new_page = Page::<BTreeRecord<K>>::new(&self.index_device, child, page.lba);
+                        let new_page = Page::<BTreeRecord<K>>::new(self.index_device.clone(), child, page.lba);
                         next_level.push(new_page);
                     }
                 }
@@ -381,6 +373,7 @@ mod tests {
             btree.insert(IntKey{value: 11});
             btree.insert(IntKey{value: 12});
             btree.insert(IntKey{value: 13});
+        
             // assert_eq!(btree.search(IntKey{value: 10}), true);
             // assert_eq!(btree.search(IntKey{value: 11}), true);
             // assert_eq!(btree.search(IntKey{value: 12}), true);
