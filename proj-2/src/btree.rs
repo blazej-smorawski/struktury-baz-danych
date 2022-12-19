@@ -255,14 +255,59 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         true
     }
 
+    pub fn can_borrow_from(&mut self, lba: u64, parent: u64) -> bool {
+        let page_counted = self.get_page(lba, parent);
+        let page = page_counted.borrow_mut();
+
+        Self::get_keys_count(&page) >= self.degree as usize
+    }
+
+    pub fn find_min(&mut self, lba: u64, parent: u64) -> BTreeRecord<K> {
+        let mut lba = lba;
+        let mut parent = parent;
+        loop {
+            let page_counted = self.get_page(lba, parent);
+            let page = page_counted.borrow();
+
+            let first_record = page.records.first().unwrap();
+
+            if let Some(next_lba) =  first_record.child_lba {
+                lba = next_lba;
+                parent = page.lba;
+            } else {
+                return *first_record.clone()
+            }
+        }
+    }
+
+    pub fn find_max(&mut self, lba: u64, parent: u64) -> BTreeRecord<K> {
+        let mut lba = lba;
+        let mut parent = parent;
+        loop {
+            let page_counted = self.get_page(lba, parent);
+            let page = page_counted.borrow();
+
+            let last_record = page.records.last().unwrap();
+
+            if let Some(next_lba) = last_record.child_lba {
+                lba = next_lba;
+                parent = page.lba;
+            } else {
+                return *last_record.clone()
+            }
+        }
+    }
+
     pub fn remove(&mut self, key: K) {
         let root_counted = self.get_page(0, u64::max_value());
         let mut page = root_counted.borrow_mut();
         self.remove_internal(key, &mut page);
     }
 
-    pub fn remove_internal(&mut self, key: K, page: &mut Page<BTreeRecord<K>>) {
+    pub fn remove_internal(&mut self, key: K, lba: u64, parent: u64) {
         // ------ 1 ------
+        let root_counted = self.get_page(lba, parent);
+        let mut page = root_counted.borrow_mut();
         let index_option = page.records.iter().position(|x| x.key == key);
 
         // Jest w tym węźle
@@ -273,75 +318,52 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 page.dirty = true;
                 return;
             } else {
+                // ------ 2 ------
                 let left_child_lba = page.records[index].child_lba.unwrap();
-                let left_child_counted = self.get_page(left_child_lba, page.lba);
-                let mut left_child = left_child_counted.borrow_mut();
+                let right_child_lba = page.records[index + 1].child_lba.unwrap();
 
-                if Self::get_keys_count(&left_child) >= self.degree as usize {
-                    // ------ 2a ------
-                    let last_key_index = left_child
-                        .records
-                        .iter()
-                        .filter(|x| x.key != K::invalid())
-                        .count()
-                        - 1;
-                    let predecessor_key = left_child.records[last_key_index].key;
-                    let predecessor_data = left_child.records[last_key_index].data_lba;
-
-                    self.remove_internal(predecessor_key, &mut left_child);
-
-                    page.records[index].key = predecessor_key;
-                    page.records[index].data_lba = predecessor_data;
-                    page.dirty = true;
-                    return;
+                // ------ 2a ------
+                if self.can_borrow_from(left_child_lba, page.lba) {
+                    let swap = self.find_max(left_child_lba, page.lba);
+                    self.remove_internal(swap.key, left_child_lba);
+                } else if self.can_borrow_from(right_child_lba, page.lba) {
+                    let swap = self.find_min(left_child_lba, page.lba);
+                    self.remove_internal(swap.key, left_child_lba);
                 } else {
-                    let right_child_lba = page.records[index + 1].child_lba.unwrap();
-                    let right_child_counted = self.get_page(right_child_lba, page.lba);
-                    let mut right_child = right_child_counted.borrow_mut();
+                    // ------ 2c ------
+                    // let right_child_lba = page.records[index + 1].child_lba.unwrap();
+                    // let right_child_counted = self.get_page(right_child_lba, page.lba);
+                    // let mut right_child = right_child_counted.borrow_mut();
 
-                    if Self::get_keys_count(&right_child) >= self.degree as usize {
-                        // ------ 2b ------
-                        let successor_key = right_child.records.first().unwrap().key;
-                        let successor_data = right_child.records.first().unwrap().data_lba;
+                    // let moved_key = page.records[index].key;
+                    // let moved_data = page.records[index].data_lba;
+                    // page.records.remove(index);
+                    // page.records[index].child_lba = Some(left_child_lba);
 
-                        self.remove_internal(successor_key, &mut right_child);
+                    // if left_child.records.last_mut().unwrap().key != K::invalid() {
+                    //     // Leaf
+                    //     left_child.records.push(Box::new(BTreeRecord::<K> {
+                    //         child_lba: None,
+                    //         key: K::invalid(),
+                    //         data_lba: 0,
+                    //     }));
+                    // }
 
-                        page.records[index].key = successor_key;
-                        page.records[index].data_lba = successor_data;
-                        page.dirty = true;
-                        return;
-                    } else {
-                        // ------ 2c ------
-                        let moved_key = page.records[index].key;
-                        let moved_data = page.records[index].data_lba;
-                        page.records.remove(index);
-                        page.records[index].child_lba = Some(left_child_lba);
+                    // let left_child_last_index = left_child.records.len() - 1;
+                    // left_child.records[left_child_last_index].key = moved_key;
+                    // left_child.records[left_child_last_index].data_lba = moved_data;
+                    // left_child.records.append(&mut right_child.records);
 
-                        if left_child.records.last_mut().unwrap().key != K::invalid() {
-                            // Leaf
-                            left_child.records.push(Box::new(BTreeRecord::<K> {
-                                child_lba: None,
-                                key: K::invalid(),
-                                data_lba: 0,
-                            }));
-                        }
+                    // self.remove_internal(key, &mut left_child);
 
-                        let left_child_last_index = left_child.records.len() - 1;
-                        left_child.records[left_child_last_index].key = moved_key;
-                        left_child.records[left_child_last_index].data_lba = moved_data;
-                        left_child.records.append(&mut right_child.records);
+                    // if page.lba == 0 && page.records.len() == 1 {
+                    //     // Empty root
+                    //     page.records.clear();
+                    //     page.records.append(&mut left_child.records);
+                    // }
 
-                        self.remove_internal(key, &mut left_child);
-
-                        if page.lba == 0 && page.records.len() == 1 {
-                            // Empty root
-                            page.records.clear();
-                            page.records.append(&mut left_child.records);
-                        }
-
-                        page.dirty = true;
-                        return;
-                    }
+                    // page.dirty = true;
+                    return;
                 }
             }
         } else {
@@ -387,38 +409,32 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                         .unwrap()
                         < next_search_index
                     {
-                        // Lewy brat
-                        let moved_index = brother_page.records.len() - 1;
-                        let mut moved_to_right = brother_page.records.remove(moved_index);
-                        std::mem::swap(&mut moved_to_right.key, &mut page.records[next_search_index - 1].key);
-                        //moved_to_right.data_lba = page.records[next_search_index - 1].data_lba;
-                        next_page.records.insert(0, moved_to_right);
-                        
-                    } else {
-                        // Prawy brat
-                        if next_page.records.last_mut().unwrap().key != K::invalid() {
-                            // Leaf
-                            next_page.records.push(Box::new(BTreeRecord::<K> {
-                                child_lba: None,
-                                key: K::invalid(),
-                                data_lba: 0,
-                            }));
+                        std::mem::swap(
+                            &mut brother_page.records.last_mut().unwrap().key,
+                            &mut page.records[next_search_index - 1].key,
+                        );
+                        next_page
+                            .records
+                            .insert(0, brother_page.records.pop().unwrap());
+
+                        if page.records[next_search_index - 1].key == K::invalid() {
+                            std::mem::swap(
+                                &mut brother_page.records.last_mut().unwrap().key,
+                                &mut page.records[next_search_index - 1].key,
+                            );
                         }
-
-                        next_page.records.last_mut().unwrap().key =
-                            page.records[next_search_index].key;
-                        next_page.records.last_mut().unwrap().data_lba =
-                            page.records[next_search_index].data_lba;
-
-                        let moved_index = 0;
-                        let mut moved_to_left = brother_page.records.remove(moved_index);
-                        page.records[next_search_index].key = moved_to_left.key;
-                        page.records[next_search_index].data_lba = moved_to_left.data_lba;
-
-                        moved_to_left.key = K::invalid();
-                        moved_to_left.data_lba = 0;
-                        if moved_to_left.child_lba != None {
-                            next_page.records.push(moved_to_left);
+                    } else {
+                        std::mem::swap(
+                            &mut brother_page.records.first_mut().unwrap().key,
+                            &mut page.records[next_search_index].key,
+                        );
+                        next_page.records.push(brother_page.records.remove(0));
+                        if next_page.records.last().unwrap().child_lba != None {
+                            let last_record = next_page.records.len() - 1;
+                            let temp = next_page.records[last_record].key;
+                            next_page.records[last_record].key =
+                                next_page.records[last_record - 1].key;
+                            next_page.records[last_record - 1].key = temp;
                         }
                     }
 
@@ -897,7 +913,7 @@ mod tests {
         //keys_to_remove.shuffle(&mut thread_rng());
         println!("{:?}", keys_to_remove);
 
-        let keys_to_stay: Vec<i32> = (1..=20).filter(|x| !keys_to_remove.contains(x)).collect();
+        let mut keys_to_stay: Vec<i32> = keys.clone();
 
         for key in &keys {
             btree.insert(IntKey { value: *key });
@@ -907,10 +923,19 @@ mod tests {
 
         for key in &keys_to_remove {
             println!("Removing {:?}", *key);
+
             assert_eq!(btree.search(IntKey { value: *key }), true);
             btree.remove(IntKey { value: *key });
-            assert_eq!(btree.search(IntKey { value: *key }), false);
             btree.print();
+
+            assert_eq!(btree.search(IntKey { value: *key }), false);
+
+            let index = keys_to_stay.iter().position(|x| *x == *key).unwrap();
+            keys_to_stay.remove(index);
+
+            for key in &keys_to_stay {
+                assert_eq!(btree.search(IntKey { value: *key }), true);
+            }
         }
 
         for key in &keys_to_stay {
@@ -951,10 +976,6 @@ mod tests {
             assert_eq!(btree.search(IntKey { value: *key }), true);
             btree.remove(IntKey { value: *key });
             assert_eq!(btree.search(IntKey { value: *key }), false);
-        }
-
-        for key in &keys_to_stay {
-            assert_eq!(btree.search(IntKey { value: *key }), true);
         }
 
         btree.print();
