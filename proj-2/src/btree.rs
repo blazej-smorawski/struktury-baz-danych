@@ -47,10 +47,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
     }
 
     fn get_keys_count(page: &Page<BTreeRecord<K>>) -> usize {
-        page.records
-            .iter()
-            .filter(|x| x.key != K::invalid())
-            .count()
+        page.records.iter().filter(|x| x.key != K::invalid()).count()
     }
 
     fn get_page(&mut self, lba: u64, parent: u64) -> Rc<RefCell<Page<BTreeRecord<K>>>> {
@@ -118,10 +115,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             new_child.records.push(child.records.remove(centre_index));
         }
 
-        let child_record_index_option = parent
-            .records
-            .iter()
-            .position(|x| x.child_lba == Some(child.lba));
+        let child_record_index_option = parent.records.iter().position(|x| x.child_lba == Some(child.lba));
         let child_record_index = match child_record_index_option {
             Some(index) => index,
             None => panic!("Tried to split `Page` that is not a child of `parent`"),
@@ -168,11 +162,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
                 let next_index = self.get_next_index_lba();
                 let new_page = self.get_page(next_index, 0);
-                BTree::<K, T>::split_child(
-                    &mut root,
-                    &mut working_page,
-                    &mut new_page.borrow_mut(),
-                );
+                BTree::<K, T>::split_child(&mut root, &mut working_page, &mut new_page.borrow_mut());
             }
         }
 
@@ -255,7 +245,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         true
     }
 
-    pub fn can_borrow_from(&mut self, lba: u64, parent: u64) -> bool {
+    fn can_borrow_from(&mut self, lba: u64, parent: u64) -> bool {
         let page_counted = self.get_page(lba, parent);
         let page = page_counted.borrow_mut();
 
@@ -271,11 +261,11 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
             let first_record = page.records.first().unwrap();
 
-            if let Some(next_lba) =  first_record.child_lba {
+            if let Some(next_lba) = first_record.child_lba {
                 lba = next_lba;
                 parent = page.lba;
             } else {
-                return *first_record.clone()
+                return *first_record.clone();
             }
         }
     }
@@ -293,31 +283,223 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 lba = next_lba;
                 parent = page.lba;
             } else {
-                return *last_record.clone()
+                return *last_record.clone();
             }
         }
     }
 
-    pub fn remove(&mut self, key: K) {
-        let root_counted = self.get_page(0, u64::max_value());
-        let mut page = root_counted.borrow_mut();
-        self.remove_internal(key, &mut page);
+    fn join_children(&mut self, lba: u64, parent: u64, index: usize) -> (u64, u64) {
+        let mut result_lba = 0;
+        {
+            let page_counted = self.get_page(lba, parent);
+            let mut page = page_counted.borrow_mut();
+
+            let left_child_lba = page.records[index].child_lba.unwrap();
+            let left_child_counted = self.get_page(left_child_lba, page.lba);
+            let mut left_child = left_child_counted.borrow_mut();
+
+            let right_child_lba = page.records[index + 1].child_lba.unwrap();
+            let right_child_counted = self.get_page(right_child_lba, page.lba);
+            let mut right_child = right_child_counted.borrow_mut();
+
+            // Pages prepared
+
+            let moved_key = page.records[index].key;
+            let moved_data = page.records[index].data_lba;
+            page.records.remove(index);
+            page.records[index].child_lba = Some(left_child_lba);
+
+            // Jeśli łączymy liście, to musimy dodać nowy rekord
+            // do którego włożymy rekord z `page`. Jeśli łączymy
+            // nie-liście to nie musimy tego robić bo jest tam rekrod
+            // w postaci ptr.*
+            if left_child.records.last_mut().unwrap().key != K::invalid() {
+                // Leaf
+                left_child.records.push(Box::new(BTreeRecord::<K> {
+                    child_lba: None,
+                    key: K::invalid(),
+                    data_lba: 0,
+                }));
+            }
+
+            left_child.records.last_mut().unwrap().key = moved_key;
+            left_child.records.last_mut().unwrap().data_lba = moved_data;
+            left_child.records.append(&mut right_child.records);
+
+            // Right child invalid
+            left_child.dirty = true;
+            right_child.dirty = true;
+            page.dirty = true;
+
+            result_lba = left_child.lba
+        }
+
+        self.fix_root(lba, parent, result_lba, lba)
     }
 
-    pub fn remove_internal(&mut self, key: K, lba: u64, parent: u64) {
-        // ------ 1 ------
-        let root_counted = self.get_page(lba, parent);
-        let mut page = root_counted.borrow_mut();
-        let index_option = page.records.iter().position(|x| x.key == key);
+    fn fix_root(&mut self, lba: u64, parent: u64, new_root_lba: u64, new_root_parent: u64) -> (u64, u64) {
+        let page_counted = self.get_page(lba, parent);
+        let mut page = page_counted.borrow_mut();
 
-        // Jest w tym węźle
+        if page.lba == 0 && page.records.len() == 1 {
+            // Empty root
+            page.records.clear();
+
+            let new_root_counted = self.get_page(new_root_lba, new_root_parent);
+            let mut new_root = new_root_counted.borrow_mut();
+
+            page.records.append(&mut new_root.records);
+
+            page.dirty = true;
+            new_root.dirty = true;
+
+            return (page.lba, page.parent_lba)
+        }
+
+        (new_root_lba, new_root_parent)
+    }
+
+    fn get_child_at(&mut self, lba: u64, parent: u64, index: usize) -> (u64, u64) {
+        let parent_counted = self.get_page(lba, parent);
+        let parent = parent_counted.borrow();
+
+        let child_lba = parent.records[index].child_lba.expect("Tried to enter leafs child!");
+        let child_parent_lba = parent.lba;
+
+        (child_lba, child_parent_lba)
+    }
+
+    fn can_borrow_from_child(&mut self, lba: u64, parent: u64, index: usize) -> bool {
+        let parent_counted = self.get_page(lba, parent);
+        let parent = parent_counted.borrow();
+
+        let child_record = match parent.records.get(index) {
+            Some(child) => child,
+            None => return false,
+        };
+
+        self.can_borrow_from(
+            child_record.child_lba.expect("Tried to borrow from leafs child!"),
+            parent.lba,
+        )
+    }
+
+    fn borrow_left(&mut self, lba: u64, parent: u64, index: usize) {
+        let parent_counted = self.get_page(lba, parent);
+        let mut parent = parent_counted.borrow_mut();
+
+        let (brother_lba, brother_parent) = self.get_child_at(parent.lba, parent.parent_lba, index - 1);
+        let brother_counted = self.get_page(brother_lba, brother_parent);
+        let mut brother = brother_counted.borrow_mut();
+
+        let (target_lba, target_parent) = self.get_child_at(parent.lba, parent.parent_lba, index);
+        let target_counted = self.get_page(target_lba, target_parent);
+        let mut target = target_counted.borrow_mut();
+
+        std::mem::swap(
+            &mut brother.records.last_mut().unwrap().key,
+            &mut parent.records[index - 1].key,
+        );
+        target.records.insert(0, brother.records.pop().unwrap());
+
+        if parent.records[index - 1].key == K::invalid() {
+            std::mem::swap(
+                &mut brother.records.last_mut().unwrap().key,
+                &mut parent.records[index - 1].key,
+            );
+        }
+
+        parent.dirty = true;
+        brother.dirty = true;
+        target.dirty = true;
+    }
+
+    fn borrow_right(&mut self, lba: u64, parent: u64, index: usize) {
+        let parent_counted = self.get_page(lba, parent);
+        let mut parent = parent_counted.borrow_mut();
+
+        let (brother_lba, brother_parent) = self.get_child_at(parent.lba, parent.parent_lba, index + 1);
+        let brother_counted = self.get_page(brother_lba, brother_parent);
+        let mut brother = brother_counted.borrow_mut();
+
+        let (target_lba, target_parent) = self.get_child_at(parent.lba, parent.parent_lba, index);
+        let target_counted = self.get_page(target_lba, target_parent);
+        let mut target = target_counted.borrow_mut();
+
+        std::mem::swap(
+            &mut brother.records.first_mut().unwrap().key,
+            &mut parent.records[index].key,
+        );
+        target.records.push(brother.records.remove(0));
+
+        if target.records.last().unwrap().child_lba != None {
+            let last_record = target.records.len() - 1;
+            let temp = target.records[last_record].key;
+            target.records[last_record].key = target.records[last_record - 1].key;
+            target.records[last_record - 1].key = temp;
+        }
+
+        parent.dirty = true;
+        brother.dirty = true;
+        target.dirty = true;
+    }
+
+    fn join_with_sibling(&mut self, lba: u64, parent: u64, index: usize) -> (u64, u64) {
+        let sibling_index = index.checked_sub(1).unwrap_or(index);
+
+        self.join_children(lba, parent, sibling_index)
+    }
+
+    pub fn prepare_for_remove(&mut self, lba: u64, parent: u64, index: usize) {
+        let (next_lba, next_parent) = self.get_child_at(lba, parent, index);
+
+        {
+            let next_page_counted = self.get_page(next_lba, next_parent);
+            let mut next_page = next_page_counted.borrow_mut();
+
+            if Self::get_keys_count(&next_page) > (self.degree - 1) as usize {
+                return;
+            }
+        }
+
+        // ------ 3a ------
+        if self.can_borrow_from_child(lba, parent, index.checked_sub(1).unwrap_or(usize::max_value())) {
+            self.borrow_left(lba, parent, index);
+            return;
+        } else if self.can_borrow_from_child(lba, parent, index + 1) {
+            self.borrow_right(lba, parent, index);
+            return;
+        }
+
+        // ------ 3b ------
+        self.join_with_sibling(lba, parent, index);
+    }
+
+    pub fn remove(&mut self, key: K) {
+        self.remove_internal(key, 0, u64::max_value());
+    }
+
+    fn remove_internal(&mut self, key: K, lba: u64, parent: u64) {
+        let mut index_option = None;
+        {
+            let page_counted = self.get_page(lba, parent);
+            let page = page_counted.borrow_mut();
+            index_option = page.records.iter().position(|x| x.key == key);
+        }
+
         if let Some(index) = index_option {
             // Jest liściem
-            if page.records[index].child_lba == None {
-                page.records.remove(index);
-                page.dirty = true;
-                return;
-            } else {
+            {
+                let page_counted = self.get_page(lba, parent);
+                let mut page = page_counted.borrow_mut();
+
+                // ------ 1 ------
+                if page.records[index].child_lba == None {
+                    page.records.remove(index);
+                    page.dirty = true;
+                    return;
+                }
+
                 // ------ 2 ------
                 let left_child_lba = page.records[index].child_lba.unwrap();
                 let right_child_lba = page.records[index + 1].child_lba.unwrap();
@@ -325,195 +507,51 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 // ------ 2a ------
                 if self.can_borrow_from(left_child_lba, page.lba) {
                     let swap = self.find_max(left_child_lba, page.lba);
-                    self.remove_internal(swap.key, left_child_lba);
+                    self.remove_internal(swap.key, left_child_lba, page.lba);
+
+                    page.records[index].key = swap.key;
+                    page.records[index].data_lba = swap.data_lba;
+
+                    return;
                 } else if self.can_borrow_from(right_child_lba, page.lba) {
-                    let swap = self.find_min(left_child_lba, page.lba);
-                    self.remove_internal(swap.key, left_child_lba);
-                } else {
-                    // ------ 2c ------
-                    // let right_child_lba = page.records[index + 1].child_lba.unwrap();
-                    // let right_child_counted = self.get_page(right_child_lba, page.lba);
-                    // let mut right_child = right_child_counted.borrow_mut();
+                    let swap = self.find_min(right_child_lba, page.lba);
+                    self.remove_internal(swap.key, right_child_lba, page.lba);
 
-                    // let moved_key = page.records[index].key;
-                    // let moved_data = page.records[index].data_lba;
-                    // page.records.remove(index);
-                    // page.records[index].child_lba = Some(left_child_lba);
+                    page.records[index].key = swap.key;
+                    page.records[index].data_lba = swap.data_lba;
 
-                    // if left_child.records.last_mut().unwrap().key != K::invalid() {
-                    //     // Leaf
-                    //     left_child.records.push(Box::new(BTreeRecord::<K> {
-                    //         child_lba: None,
-                    //         key: K::invalid(),
-                    //         data_lba: 0,
-                    //     }));
-                    // }
-
-                    // let left_child_last_index = left_child.records.len() - 1;
-                    // left_child.records[left_child_last_index].key = moved_key;
-                    // left_child.records[left_child_last_index].data_lba = moved_data;
-                    // left_child.records.append(&mut right_child.records);
-
-                    // self.remove_internal(key, &mut left_child);
-
-                    // if page.lba == 0 && page.records.len() == 1 {
-                    //     // Empty root
-                    //     page.records.clear();
-                    //     page.records.append(&mut left_child.records);
-                    // }
-
-                    // page.dirty = true;
                     return;
                 }
             }
+
+            // ------ 2c ------
+            let (next_lba, next_parent) = self.join_children(lba, parent, index);
+            self.remove_internal(key, next_lba, next_parent);
+
+            return;
         } else {
-            // ------ 3 ------
-            let next_search_index = page
-                .records
-                .iter()
-                .position(|x| x.key == K::invalid() || x.key > key)
-                .expect("Could not find proper position for further search");
+            let mut next_index = 0;
+            let mut next_lba = 0;
 
-            let next_lba = page.records[next_search_index]
-                .child_lba
-                .expect("Tried to enter leafs child!");
-            let next_parent_lba = page.lba;
+            {
+                let page_counted = self.get_page(lba, parent);
+                let page = page_counted.borrow_mut();
 
-            let next_page_counted = self.get_page(next_lba, next_parent_lba);
-            let mut next_page = next_page_counted.borrow_mut();
+                // ------ 3 ------
+                next_index = page
+                    .records
+                    .iter()
+                    .position(|x| x.key == K::invalid() || x.key > key)
+                    .expect("Could not find proper position for further search");
 
-            if Self::get_keys_count(&next_page) == (self.degree - 1) as usize {
-                let left_brother = page.records.get(
-                    next_search_index
-                        .checked_sub(1)
-                        .unwrap_or(usize::max_value()),
-                );
-                let right_brother = page.records.get(next_search_index + 1);
-                let brothers = vec![left_brother, right_brother];
-
-                let brother_option = brothers.iter().flatten().find(|x| {
-                    let brother_counted = self.get_page(x.child_lba.unwrap(), page.lba);
-                    let brother_page = brother_counted.borrow();
-                    Self::get_keys_count(&brother_page) >= self.degree as usize
-                });
-
-                if let Some(brother) = brother_option {
-                    // ------ 3a ------
-                    let brother_counted = self.get_page(brother.child_lba.unwrap(), page.lba);
-                    let mut brother_page = brother_counted.borrow_mut();
-
-                    if page
-                        .records
-                        .iter()
-                        .position(|x| x.key == brother.key)
-                        .unwrap()
-                        < next_search_index
-                    {
-                        std::mem::swap(
-                            &mut brother_page.records.last_mut().unwrap().key,
-                            &mut page.records[next_search_index - 1].key,
-                        );
-                        next_page
-                            .records
-                            .insert(0, brother_page.records.pop().unwrap());
-
-                        if page.records[next_search_index - 1].key == K::invalid() {
-                            std::mem::swap(
-                                &mut brother_page.records.last_mut().unwrap().key,
-                                &mut page.records[next_search_index - 1].key,
-                            );
-                        }
-                    } else {
-                        std::mem::swap(
-                            &mut brother_page.records.first_mut().unwrap().key,
-                            &mut page.records[next_search_index].key,
-                        );
-                        next_page.records.push(brother_page.records.remove(0));
-                        if next_page.records.last().unwrap().child_lba != None {
-                            let last_record = next_page.records.len() - 1;
-                            let temp = next_page.records[last_record].key;
-                            next_page.records[last_record].key =
-                                next_page.records[last_record - 1].key;
-                            next_page.records[last_record - 1].key = temp;
-                        }
-                    }
-
-                    page.dirty = true;
-                    next_page.dirty = true;
-                    brother_page.dirty = true;
-                } else {
-                    // ------ 3b ------
-                    let brother = brothers.iter().flatten().next().unwrap();
-                    let brother_counted = self.get_page(brother.child_lba.unwrap(), page.lba);
-                    let mut brother_page = brother_counted.borrow_mut();
-
-                    if page
-                        .records
-                        .iter()
-                        .position(|x| x.key == brother.key)
-                        .unwrap()
-                        < next_search_index
-                    {
-                        if brother_page.records.last_mut().unwrap().key != K::invalid() {
-                            // Leaf
-                            brother_page.records.push(Box::new(BTreeRecord::<K> {
-                                child_lba: None,
-                                key: K::invalid(),
-                                data_lba: 0,
-                            }));
-                        }
-                        brother_page.records.last_mut().unwrap().key =
-                            page.records[next_search_index - 1].key;
-                        brother_page.records.last_mut().unwrap().data_lba =
-                            page.records[next_search_index - 1].data_lba;
-
-                        let mut index = 0;
-                        while !brother_page.records.is_empty() {
-                            let record = brother_page.records.remove(0);
-                            next_page.records.insert(index, record);
-                            index += 1;
-                        }
-
-                        page.records.remove(next_search_index - 1);
-                    } else {
-                        if next_page.records.last_mut().unwrap().key != K::invalid() {
-                            // Leaf
-                            next_page.records.push(Box::new(BTreeRecord::<K> {
-                                child_lba: None,
-                                key: K::invalid(),
-                                data_lba: 0,
-                            }));
-                        }
-                        next_page.records.last_mut().unwrap().key =
-                            page.records[next_search_index].key;
-                        next_page.records.last_mut().unwrap().data_lba =
-                            page.records[next_search_index].data_lba;
-
-                        while !brother_page.records.is_empty() {
-                            let record = brother_page.records.remove(0);
-                            next_page.records.push(record);
-                        }
-
-                        page.records[next_search_index + 1].child_lba =
-                            page.records[next_search_index].child_lba;
-                        page.records.remove(next_search_index);
-                    }
-
-                    page.dirty = true;
-                    next_page.dirty = true;
-                    brother_page.dirty = true;
-                }
+                next_lba = page.records[next_index]
+                    .child_lba
+                    .expect("Tried to enter leafs child!");
             }
 
-            self.remove_internal(key, &mut next_page);
+            self.prepare_for_remove(lba, parent, next_index);
 
-            if page.lba == 0 && page.records.len() == 1 {
-                // Empty root
-                page.records.clear();
-                page.records.append(&mut next_page.records);
-                page.dirty = true;
-                next_page.dirty = true;
-            }
+            self.remove_internal(key, next_lba, lba);
         }
     }
 
@@ -640,8 +678,7 @@ mod tests {
         }
 
         let device = BlockDevice::new("test_search.hex".to_string(), block_size, false).unwrap();
-        let mut data_device =
-            BlockDevice::new("test_search_data.hex".to_string(), block_size, false).unwrap();
+        let mut data_device = BlockDevice::new("test_search_data.hex".to_string(), block_size, false).unwrap();
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
         assert_eq!(btree.search(IntKey { value: 20 }), true);
@@ -697,8 +734,7 @@ mod tests {
     fn test_split_with_children() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device =
-            BlockDevice::new("test_split_with_children.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_split_with_children.hex".to_string(), block_size, true).unwrap();
         let device = Rc::new(RefCell::new(device));
         let mut root_page = Page::<BTreeRecord<IntKey>>::new(device.clone(), 0, 0);
         let mut child_page = Page::<BTreeRecord<IntKey>>::new(device.clone(), 1, 0);
@@ -752,8 +788,7 @@ mod tests {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device =
-            BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -777,8 +812,7 @@ mod tests {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device =
-            BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -802,8 +836,7 @@ mod tests {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device =
-            BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -828,8 +861,7 @@ mod tests {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device =
-            BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -858,10 +890,8 @@ mod tests {
     fn test_remove_small() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device =
-            BlockDevice::new("test_remove_leaf.hex".to_string(), block_size, true).unwrap();
-        let data_device =
-            BlockDevice::new("test_remove_leaf.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_remove_leaf.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_remove_leaf.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -895,20 +925,14 @@ mod tests {
     fn test_remove_medium() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device =
-            BlockDevice::new("test_remove_medium.hex".to_string(), block_size, true).unwrap();
-        let data_device =
-            BlockDevice::new("test_remove_medium.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_remove_medium.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_remove_medium.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
-        let mut keys: Vec<i32> = vec![
-            5, 2, 1, 3, 4, 6, 10, 15, 20, 19, 18, 17, 12, 11, 9, 7, 8, 13, 14, 16,
-        ];
+        let mut keys: Vec<i32> = vec![5, 2, 1, 3, 4, 6, 10, 15, 20, 19, 18, 17, 12, 11, 9, 7, 8, 13, 14, 16];
 
-        let keys_to_remove = vec![
-            12, 9, 19, 2, 8, 7, 5, 10, 15, 1, 14, 20, 13, 6, 11, 18, 17, 16, 4, 3,
-        ];
+        let keys_to_remove = vec![12, 9, 19, 2, 8, 7, 5, 10, 15, 1, 14, 20, 13, 6, 11, 18, 17, 16, 4, 3];
         //let mut keys_to_remove: Vec<i32> = keys.clone();
         //keys_to_remove.shuffle(&mut thread_rng());
         println!("{:?}", keys_to_remove);
@@ -951,19 +975,14 @@ mod tests {
     fn test_remove_smoke() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device =
-            BlockDevice::new("test_remove_smoke.hex".to_string(), block_size, true).unwrap();
-        let data_device =
-            BlockDevice::new("test_remove_smoke.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_remove_smoke.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_remove_smoke.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
         let keys: Vec<i32> = (1..=1000).collect();
 
-        let keys_to_remove: Vec<i32> = keys
-            .choose_multiple(&mut rand::thread_rng(), 500)
-            .cloned()
-            .collect();
+        let keys_to_remove: Vec<i32> = keys.choose_multiple(&mut rand::thread_rng(), 500).cloned().collect();
         let keys_to_stay: Vec<i32> = (1..=20).filter(|x| !keys_to_remove.contains(x)).collect();
 
         for key in &keys {
