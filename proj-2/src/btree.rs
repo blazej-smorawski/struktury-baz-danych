@@ -792,8 +792,8 @@ mod tests {
     fn test_insert_random() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_insert_random.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_random_data.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -816,8 +816,8 @@ mod tests {
     fn test_insert_increasing() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_insert_increasing.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_increasing_data.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -840,8 +840,8 @@ mod tests {
     fn test_insert_decreasing() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_insert_decreasing.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_decreasing_data.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -865,8 +865,8 @@ mod tests {
     fn test_insert_small_random_duplicates() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_insert_data.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_insert_small_random_duplicates.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_insert_small_random_duplicates.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
@@ -984,7 +984,8 @@ mod tests {
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
-        let keys: Vec<i32> = (1..=100).collect();
+        let mut keys: Vec<i32> = (1..=1000).collect();
+        keys.shuffle(&mut thread_rng());
         let mut keys_to_stay: Vec<i32> = keys.clone();
 
         let keys_to_remove: Vec<i32> = keys.choose_multiple(&mut rand::thread_rng(), 500).cloned().collect();
