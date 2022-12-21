@@ -2,6 +2,7 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::{cell::RefCell, rc::Rc, vec};
 
+use crate::pair::Pair;
 use crate::{
     btree_key::{BTreeKey, IntKey},
     btree_record::BTreeRecord,
@@ -16,8 +17,10 @@ pub struct BTree<K: BTreeKey, T: Record> {
     pub data_device: Rc<RefCell<BlockDevice>>,
     pub loaded_data: Vec<T>,
     pub degree: u64,
-    pub index_pages_count: u64,
-    pub data_pages_count: u64,
+    index_pages_max: u64,
+    index_pages_free_list: Vec<u64>,
+    data_pages_max: u64,
+    data_pages_free_list: Vec<u64>,
     cache: LruCache<u64, Rc<RefCell<Page<BTreeRecord<K>>>>>,
 }
 
@@ -35,8 +38,10 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             data_device: data_device.clone(),
             loaded_data: vec![],
             degree: degree,
-            index_pages_count: 1,
-            data_pages_count: 0,
+            index_pages_max: 1,
+            index_pages_free_list: vec![],
+            data_pages_max: 0,
+            data_pages_free_list: vec![],
             cache: LruCache::new(NonZeroUsize::new(4).unwrap()),
         };
 
@@ -100,15 +105,69 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
     }
 
     fn get_next_index_lba(&mut self) -> u64 {
-        let ret = self.index_pages_count;
-        self.index_pages_count += 1;
-        ret
+        if self.index_pages_free_list.is_empty() {
+            let new_page = self.index_pages_max;
+            self.index_pages_max += 1;
+            self.index_pages_free_list.push(new_page);
+        }
+
+        // We take min and remove it from free list
+        let min = *self.index_pages_free_list.iter().min().unwrap();
+        let min_index = self.index_pages_free_list.iter().position(|x| *x == min).unwrap();
+        self.index_pages_free_list.remove(min_index);
+
+        min
     }
 
     fn get_next_data_lba(&mut self) -> u64 {
-        let ret = self.data_pages_count;
-        self.data_pages_count += 1;
-        ret
+        if self.data_pages_free_list.is_empty() {
+            let new_page = self.data_pages_max;
+            self.data_pages_max += 1;
+            self.data_pages_free_list.push(new_page);
+        }
+
+        // Just return min, because the insert is responsible for removing it
+        *self.data_pages_free_list.iter().min().unwrap()
+    }
+
+    fn insert_record(&mut self, key: K, record: T, lba: u64) {
+        let mut page = Page::<Pair<K, T>>::new(self.data_device.clone(), lba, u64::max_value());
+
+        page.records.push(Box::new(Pair {
+            key: key,
+            value: record,
+        }));
+        page.dirty = true;
+
+        let device_counted = self.data_device.clone();
+        let device = device_counted.borrow();
+
+        if (page.records.len() + 1) * Pair::<K, T>::get_size() as usize > device.block_size as usize {
+            // Remove it from free list
+            let lba_index = self.index_pages_free_list.iter().position(|x| *x == lba).unwrap();
+            self.data_pages_free_list.remove(lba_index);
+        }
+    }
+
+    fn delete_record(&mut self, key: K, lba: u64) {
+        let mut page = Page::<Pair<K, T>>::new(self.data_device.clone(), lba, u64::max_value());
+
+        let key_index = page.records.iter().position(|x| x.key == key).unwrap();
+        page.records.remove(key_index);
+        page.dirty = true;
+
+        if self.data_pages_free_list.iter().find(|x| **x == lba).is_none() {
+            self.data_pages_free_list.push(lba);
+        }
+    }
+
+    fn get_record(&mut self, key: K, lba: u64) -> Option<T> {
+        let page = Page::<Pair<K, T>>::new(self.data_device.clone(), lba, u64::max_value());
+
+        match page.records.iter().find(|x| x.key == key) {
+            Some(pair) => return Some(pair.value),
+            None => return None,
+        }
     }
 
     fn split_child(
@@ -152,8 +211,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             let root = self.get_page(0, u64::max_value());
             let mut root = root.borrow_mut();
             if Self::get_keys_count(&root) == (2 * self.degree - 1) as usize {
-                let lba = self.index_pages_count;
-                self.index_pages_count += 1;
+                let lba = self.index_pages_max;
+                self.index_pages_max += 1;
                 let working_page = self.get_page(lba, 0);
                 let mut working_page = working_page.borrow_mut();
 
@@ -186,6 +245,11 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                     key: key,
                     data_lba: 0,
                 }));
+
+                let data_lba = self.get_next_data_lba();
+
+                self.insert_record(key, record, data_lba);
+
                 page.dirty = true;
                 break;
             } else if page.records[0].child_lba == None {
@@ -201,14 +265,19 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                     .position(|x| x.key == K::invalid() || x.key >= key)
                     .unwrap_or(page.records.len());
 
+                let data_lba = self.get_next_data_lba();
+
                 page.records.insert(
                     insert_index,
                     Box::new(BTreeRecord::<K> {
                         child_lba: None,
                         key: key,
-                        data_lba: 0,
+                        data_lba: data_lba,
                     }),
                 );
+
+                self.insert_record(key, record, data_lba);
+
                 page.dirty = true;
                 break;
             } else {
@@ -335,6 +404,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             left_child.records.append(&mut right_child.records);
 
             // Right child invalid
+            self.
+
             left_child.dirty = true;
             right_child.dirty = true;
             page.dirty = true;
@@ -866,7 +937,8 @@ mod tests {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_insert_small_random_duplicates.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_insert_small_random_duplicates.hex".to_string(), block_size, true).unwrap();
+        let data_device =
+            BlockDevice::new("test_insert_small_random_duplicates.hex".to_string(), block_size, true).unwrap();
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 

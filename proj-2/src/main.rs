@@ -5,6 +5,7 @@ pub mod btree;
 pub mod btree_key;
 pub mod btree_record;
 pub mod page;
+pub mod pair;
 
 use crate::{device::BlockDevice, btree::{BTree}, record::IntRecord, btree_key::IntKey};
 
