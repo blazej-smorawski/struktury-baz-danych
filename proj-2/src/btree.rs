@@ -64,7 +64,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             .clone()
     }
 
-    fn search(&mut self, key: K) -> bool {
+    fn search(&mut self, key: K) -> Option<BTreeRecord<K>> {
         let mut page_option = Some(self.get_page(0, u64::max_value()));
 
         while let Some(page) = page_option {
@@ -79,7 +79,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                  * We found something interesting
                  */
                 if record.key == key {
-                    return true;
+                    return Some(*record.clone());
                 }
 
                 match record.child_lba {
@@ -96,7 +96,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         /*
          * We did not find anything
          */
-        false
+        None
     }
 
     fn get_next_index_lba(&mut self) -> u64 {
@@ -686,10 +686,10 @@ mod tests {
         let mut data_device = BlockDevice::new("test_search_data.hex".to_string(), block_size, false).unwrap();
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
-        assert_eq!(btree.search(IntKey { value: 20 }), true);
-        assert_eq!(btree.search(IntKey { value: 10 }), true);
-        assert_eq!(btree.search(IntKey { value: 7 }), true);
-        assert_eq!(btree.search(IntKey { value: 8 }), false);
+        assert_ne!(btree.search(IntKey { value: 20 }), None);
+        assert_ne!(btree.search(IntKey { value: 10 }), None);
+        assert_ne!(btree.search(IntKey { value: 7 }), None);
+        assert_eq!(btree.search(IntKey { value: 8 }), None);
 
         Ok(())
     }
@@ -800,11 +800,11 @@ mod tests {
         let mut keys: Vec<i32> = (1..1000).collect();
         keys.shuffle(&mut thread_rng());
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
         }
 
         for key in &keys {
-            assert_eq!(btree.search(IntKey { value: *key }), true);
+            assert_ne!(btree.search(IntKey { value: *key }), None);
         }
 
         btree.print();
@@ -824,11 +824,11 @@ mod tests {
         let keys: Vec<i32> = (1..1000).collect();
 
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
         }
 
         for key in &keys {
-            assert_eq!(btree.search(IntKey { value: *key }), true);
+            assert_ne!(btree.search(IntKey { value: *key }), None);
         }
 
         btree.print();
@@ -849,11 +849,11 @@ mod tests {
         keys.reverse();
 
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::new());
         }
 
         for key in &keys {
-            assert_eq!(btree.search(IntKey { value: *key }), true);
+            assert_ne!(btree.search(IntKey { value: *key }), None);
         }
 
         btree.print();
@@ -862,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_small_random() -> Result<(), std::io::Error> {
+    fn test_insert_small_random_duplicates() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_insert.hex".to_string(), block_size, true).unwrap();
@@ -875,15 +875,15 @@ mod tests {
         keys.shuffle(&mut thread_rng());
 
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::new());
         }
 
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::new());
         }
 
         for key in &keys {
-            assert_eq!(btree.search(IntKey { value: *key }), true);
+            assert_ne!(btree.search(IntKey { value: *key }), None);
         }
 
         btree.print();
@@ -903,22 +903,22 @@ mod tests {
         let keys: Vec<i32> = (1..5).collect();
 
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
         }
 
         btree.print();
 
-        assert_eq!(btree.search(IntKey { value: 2 }), true);
+        assert_ne!(btree.search(IntKey { value: 2 }), None);
         btree.remove(IntKey { value: 2 });
-        assert_eq!(btree.search(IntKey { value: 2 }), false);
+        assert_eq!(btree.search(IntKey { value: 2 }), None);
         btree.print();
 
         btree.remove(IntKey { value: 4 });
-        assert_eq!(btree.search(IntKey { value: 4 }), false);
+        assert_eq!(btree.search(IntKey { value: 4 }), None);
         btree.print();
 
         btree.remove(IntKey { value: 1 });
-        assert_eq!(btree.search(IntKey { value: 1 }), false);
+        assert_eq!(btree.search(IntKey { value: 1 }), None);
         btree.print();
 
         Ok(())
@@ -944,7 +944,7 @@ mod tests {
         let mut keys_to_stay: Vec<i32> = keys.clone();
 
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
         }
 
         btree.print();
@@ -952,22 +952,22 @@ mod tests {
         for key in &keys_to_remove {
             println!("Removing {:?}", *key);
 
-            assert_eq!(btree.search(IntKey { value: *key }), true);
+            assert_ne!(btree.search(IntKey { value: *key }), None);
             btree.remove(IntKey { value: *key });
             btree.print();
 
-            assert_eq!(btree.search(IntKey { value: *key }), false);
+            assert_eq!(btree.search(IntKey { value: *key }), None);
 
             let index = keys_to_stay.iter().position(|x| *x == *key).unwrap();
             keys_to_stay.remove(index);
 
             for key in &keys_to_stay {
-                assert_eq!(btree.search(IntKey { value: *key }), true);
+                assert_ne!(btree.search(IntKey { value: *key }), None);
             }
         }
 
         for key in &keys_to_stay {
-            assert_eq!(btree.search(IntKey { value: *key }), true);
+            assert_ne!(btree.search(IntKey { value: *key }), None);
         }
 
         btree.print();
@@ -984,27 +984,27 @@ mod tests {
 
         let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
 
-        let keys: Vec<i32> = (1..=10000).collect();
+        let keys: Vec<i32> = (1..=100).collect();
         let mut keys_to_stay: Vec<i32> = keys.clone();
 
         let keys_to_remove: Vec<i32> = keys.choose_multiple(&mut rand::thread_rng(), 500).cloned().collect();
 
         for key in &keys {
-            btree.insert(IntKey { value: *key });
+            btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
         }
 
         btree.print();
 
         for key in &keys_to_remove {
-            assert_eq!(btree.search(IntKey { value: *key }), true);
+            assert_ne!(btree.search(IntKey { value: *key }), None);
             btree.remove(IntKey { value: *key });
-            assert_eq!(btree.search(IntKey { value: *key }), false);
+            assert_eq!(btree.search(IntKey { value: *key }), None);
 
             let index = keys_to_stay.iter().position(|x| *x == *key).unwrap();
             keys_to_stay.remove(index);
 
             for key in &keys_to_stay {
-                assert_eq!(btree.search(IntKey { value: *key }), true);
+                assert_ne!(btree.search(IntKey { value: *key }), None);
             }
         }
 
