@@ -4,11 +4,10 @@ use byteorder::{ByteOrder, LittleEndian};
 use primes::is_prime;
 use rand::Rng;
 
-pub trait Record: Ord + Copy {
+use crate::bytes::Bytes;
+
+pub trait Record: Bytes + Ord + Copy {
     fn new() -> Self;
-    fn get_size() -> u64;
-    fn get_bytes(&self) -> Vec<u8>;
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error>;
     fn from_string(string: String) -> Result<Self, std::io::Error>;
     fn from_random() -> Result<Self, std::io::Error>;
     fn print(&self);
@@ -37,41 +36,6 @@ impl Record for IntRecord {
         IntRecord { numbers: [0; 15] }
     }
 
-    fn get_size() -> u64 {
-        //return std::mem::size_of::<u32>() as u64 * 15;
-        (std::mem::size_of::<u32>() * 15) as u64
-    }
-
-    fn get_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(size_of::<u32>() * self.numbers.len());
-
-        for value in self.numbers {
-            bytes.extend(&value.to_le_bytes());
-        }
-
-        bytes
-    }
-
-    fn from_bytes(bytes: Vec<u8>) -> Result<Self, std::io::Error> {
-        if Self::get_size() != (bytes.len() as u64) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Supplied data is not the same size as required to create the record",
-            ));
-        };
-
-        let mut record = IntRecord::new();
-
-        LittleEndian::read_u32_into(&bytes, &mut record.numbers);
-        if record.numbers[0] == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Empty record",
-            ));
-        }
-        Ok(record)
-    }
-
     fn from_string(string: String) -> Result<Self, std::io::Error> {
         let mut record = IntRecord::new();
 
@@ -97,6 +61,39 @@ impl Record for IntRecord {
 
     fn print(&self) {
         println!("{:?} <=> {}", self.numbers, self.get_primes());
+    }
+}
+
+impl Bytes for IntRecord {
+    fn invalid() -> Self {
+        Self::new()
+    }
+
+    fn get_size() -> u64 {
+        //return std::mem::size_of::<u32>() as u64 * 15;
+        (std::mem::size_of::<u32>() * 15) as u64
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(size_of::<u32>() * self.numbers.len());
+
+        for value in self.numbers {
+            bytes.extend(&value.to_le_bytes());
+        }
+
+        bytes
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        if Self::get_size() != (bytes.len() as u64) {
+            panic!("Supplied data is not the same size as required to create the record");
+        };
+
+        let mut record = IntRecord::new();
+
+        LittleEndian::read_u32_into(&bytes, &mut record.numbers);
+
+        record
     }
 }
 
@@ -165,7 +162,7 @@ mod tests {
         bytes[6] = 0;
         bytes[7] = 0;
 
-        let record = IntRecord::from_bytes(bytes)?;
+        let record = IntRecord::from_bytes(&bytes);
 
         assert_eq!(
             record.numbers,

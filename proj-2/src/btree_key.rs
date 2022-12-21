@@ -1,14 +1,11 @@
 use byteorder::{ByteOrder, LittleEndian};
 use std::fmt::{Debug, Display};
 
-pub trait BTreeKey: Ord + Copy + Debug + Display {
+use crate::bytes::Bytes;
+
+pub trait BTreeKey: Bytes + Ord + Copy + Debug + Display {
     fn is_valid(&self) -> bool;
     fn invalidate(&mut self);
-    fn to_bytes(&self) -> Vec<u8>;
-
-    fn invalid() -> Self;
-    fn from_bytes(bytes: &[u8]) -> Self;
-    fn get_size() -> u64;
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -24,7 +21,9 @@ impl BTreeKey for IntKey {
     fn invalidate(&mut self) {
         self.value = i32::min_value();
     }
+}
 
+impl Bytes for IntKey {
     fn to_bytes(&self) -> Vec<u8> {
         let mut buf = vec![0u8; 4];
         LittleEndian::write_i32(&mut buf, self.value);
