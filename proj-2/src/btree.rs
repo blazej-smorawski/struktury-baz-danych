@@ -1,3 +1,4 @@
+use colored::Colorize;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::{cell::RefCell, rc::Rc, vec};
@@ -25,17 +26,17 @@ pub struct BTree<K: BTreeKey, T: Record> {
 }
 
 impl<K: BTreeKey, T: Record> BTree<K, T> {
-    pub fn new(index_device: BlockDevice, data_device: BlockDevice) -> Self {
-        let block_size = index_device.block_size;
-        let record_size = BTreeRecord::<K>::get_size();
-        let child_count: u64 = index_device.block_size / BTreeRecord::<K>::get_size();
-        let degree = child_count / 2;
-        let index_device = Rc::new(RefCell::new(index_device));
-        let data_device = Rc::new(RefCell::new(data_device));
+    pub fn new(index_device: Rc<RefCell<BlockDevice>>, data_device: Rc<RefCell<BlockDevice>>) -> Self {
+        let degree;
+        {
+            let index_device = index_device.borrow_mut();
+            let child_count: u64 = index_device.block_size / BTreeRecord::<K>::get_size();
+            degree = child_count / 2;
+        }
 
         let btree = BTree {
-            index_device: index_device.clone(),
-            data_device: data_device.clone(),
+            index_device: index_device,
+            data_device: data_device,
             loaded_data: vec![],
             degree: degree,
             index_pages_max: 1,
@@ -46,8 +47,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         };
 
         println!(
-            "BTree:\n\t- degree: {}\n\t- index block size: {}\n\t- record size: {}\n",
-            degree, block_size, record_size
+            "BTree:\n\t- degree: {}\n\n",
+            degree,
         );
 
         btree
@@ -69,7 +70,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             .clone()
     }
 
-    fn search(&mut self, key: K) -> Option<BTreeRecord<K>> {
+    pub fn search(&mut self, key: K) -> Option<BTreeRecord<K>> {
         let mut page_option = Some(self.get_page(0, u64::max_value()));
 
         while let Some(page) = page_option {
@@ -144,21 +145,31 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
         if (page.records.len() + 1) * Pair::<K, T>::get_size() as usize > device.block_size as usize {
             // Remove it from free list
-            let lba_index = self.index_pages_free_list.iter().position(|x| *x == lba).unwrap();
+            let lba_index = self.data_pages_free_list.iter().position(|x| *x == lba).unwrap();
             self.data_pages_free_list.remove(lba_index);
         }
     }
 
-    fn delete_record(&mut self, key: K, lba: u64) {
+    fn delete_record(&mut self, key: K, lba: u64) -> T {
         let mut page = Page::<Pair<K, T>>::new(self.data_device.clone(), lba, u64::max_value());
 
         let key_index = page.records.iter().position(|x| x.key == key).unwrap();
-        page.records.remove(key_index);
+        let removed = page.records.remove(key_index);
         page.dirty = true;
 
         if self.data_pages_free_list.iter().find(|x| **x == lba).is_none() {
             self.data_pages_free_list.push(lba);
         }
+
+        removed.value
+    }
+
+    fn update_record(&mut self, key: K, record: T, lba: u64) {
+        let mut page = Page::<Pair<K, T>>::new(self.data_device.clone(), lba, u64::max_value());
+
+        let key_index = page.records.iter().position(|x| x.key == key).unwrap();
+        page.records[key_index].value = record;
+        page.dirty = true;
     }
 
     fn get_record(&mut self, key: K, lba: u64) -> Option<T> {
@@ -211,8 +222,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             let root = self.get_page(0, u64::max_value());
             let mut root = root.borrow_mut();
             if Self::get_keys_count(&root) == (2 * self.degree - 1) as usize {
-                let lba = self.index_pages_max;
-                self.index_pages_max += 1;
+                let lba = self.get_next_index_lba();
                 let working_page = self.get_page(lba, 0);
                 let mut working_page = working_page.borrow_mut();
 
@@ -253,9 +263,10 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 page.dirty = true;
                 break;
             } else if page.records[0].child_lba == None {
-                let is_present = page.records.iter().find(|x| x.key == key);
+                let found_record = page.records.iter().find(|x| x.key == key);
 
-                if is_present.is_some() {
+                if let Some(found_record) = found_record {
+                    self.update_record(key, record, found_record.data_lba);
                     return true;
                 }
 
@@ -284,9 +295,10 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 /*
                  * Non-leaf page
                  */
-                let is_present = page.records.iter().find(|x| x.key == key);
+                let found_record = page.records.iter().find(|x| x.key == key);
 
-                if is_present.is_some() {
+                if let Some(found_record) = found_record {
+                    self.update_record(key, record, found_record.data_lba);
                     return true;
                 }
 
@@ -404,7 +416,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             left_child.records.append(&mut right_child.records);
 
             // Right child invalid
-            self.
+            self.index_pages_free_list.push(right_child_lba);
 
             left_child.dirty = true;
             right_child.dirty = true;
@@ -431,6 +443,9 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
             page.dirty = true;
             new_root.dirty = true;
+
+            // New root was moved to lba 0, so it can be reused
+            self.index_pages_free_list.push(new_root_lba);
 
             return (page.lba, page.parent_lba);
         }
@@ -479,12 +494,20 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             &mut brother.records.last_mut().unwrap().key,
             &mut parent.records[index - 1].key,
         );
+        std::mem::swap(
+            &mut brother.records.last_mut().unwrap().data_lba,
+            &mut parent.records[index - 1].data_lba,
+        );
         target.records.insert(0, brother.records.pop().unwrap());
 
         if parent.records[index - 1].key == K::invalid() {
             std::mem::swap(
                 &mut brother.records.last_mut().unwrap().key,
                 &mut parent.records[index - 1].key,
+            );
+            std::mem::swap(
+                &mut brother.records.last_mut().unwrap().data_lba,
+                &mut parent.records[index - 1].data_lba,
             );
         }
 
@@ -509,6 +532,10 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             &mut brother.records.first_mut().unwrap().key,
             &mut parent.records[index].key,
         );
+        std::mem::swap(
+            &mut brother.records.first_mut().unwrap().data_lba,
+            &mut parent.records[index].data_lba,
+        );
         target.records.push(brother.records.remove(0));
 
         if target.records.last().unwrap().child_lba != None {
@@ -516,6 +543,10 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             let temp = target.records[last_record].key;
             target.records[last_record].key = target.records[last_record - 1].key;
             target.records[last_record - 1].key = temp;
+
+            let temp_data = target.records[last_record].data_lba;
+            target.records[last_record].data_lba = target.records[last_record - 1].data_lba;
+            target.records[last_record - 1].data_lba = temp_data;
         }
 
         parent.dirty = true;
@@ -534,7 +565,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         // TODO: make it return lba, parent
         {
             let next_page_counted = self.get_page(next_lba, next_parent);
-            let mut next_page = next_page_counted.borrow_mut();
+            let next_page = next_page_counted.borrow_mut();
 
             if Self::get_keys_count(&next_page) > (self.degree - 1) as usize {
                 return (next_lba, next_parent);
@@ -554,11 +585,12 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         self.join_with_sibling(lba, parent, index)
     }
 
-    pub fn remove(&mut self, key: K) {
-        self.remove_internal(key, 0, u64::max_value());
+    pub fn remove(&mut self, key: K) -> T {
+        let removed = self.remove_internal(key, 0, u64::max_value());
+        self.delete_record(removed.key, removed.data_lba)
     }
 
-    fn remove_internal(&mut self, key: K, lba: u64, parent: u64) {
+    fn remove_internal(&mut self, key: K, lba: u64, parent: u64) -> BTreeRecord<K> {
         let mut index_option = None;
         {
             let page_counted = self.get_page(lba, parent);
@@ -574,9 +606,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
                 // ------ 1 ------
                 if page.records[index].child_lba == None {
-                    page.records.remove(index);
                     page.dirty = true;
-                    return;
+                    return *page.records.remove(index);
                 }
 
                 // ------ 2 ------
@@ -586,30 +617,29 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
                 // ------ 2a ------
                 if self.can_borrow_from(left_child_lba, page.lba) {
                     let swap = self.find_max(left_child_lba, page.lba);
-                    self.remove_internal(swap.key, left_child_lba, page.lba);
+                    let mut removed = self.remove_internal(swap.key, left_child_lba, page.lba);
 
-                    page.records[index].key = swap.key;
-                    page.records[index].data_lba = swap.data_lba;
+                    std::mem::swap(&mut page.records[index].key, &mut removed.key);
+                    std::mem::swap(&mut page.records[index].data_lba, &mut removed.data_lba);
 
                     page.dirty = true;
-                    return;
+                    return removed;
                 } else if self.can_borrow_from(right_child_lba, page.lba) {
                     let swap = self.find_min(right_child_lba, page.lba);
-                    self.remove_internal(swap.key, right_child_lba, page.lba);
+                    let mut removed = self.remove_internal(swap.key, right_child_lba, page.lba);
 
-                    page.records[index].key = swap.key;
-                    page.records[index].data_lba = swap.data_lba;
+                    std::mem::swap(&mut page.records[index].key, &mut removed.key);
+                    std::mem::swap(&mut page.records[index].data_lba, &mut removed.data_lba);
 
                     page.dirty = true;
-                    return;
+                    return removed;
                 }
             }
 
             // ------ 2c ------
             let (next_lba, next_parent) = self.join_children(lba, parent, index);
-            self.remove_internal(key, next_lba, next_parent);
 
-            return;
+            return self.remove_internal(key, next_lba, next_parent);
         } else {
             let mut next_index = 0;
 
@@ -627,7 +657,7 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
 
             let (next_lba, next_parent) = self.prepare_for_remove(lba, parent, next_index);
 
-            self.remove_internal(key, next_lba, next_parent);
+            return self.remove_internal(key, next_lba, next_parent);
         }
     }
 
@@ -684,10 +714,31 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
             print!("\n\n");
         }
     }
+
+    pub fn print_data(&mut self) {
+        let mut lba = 0;
+        loop {
+            let mut page = Page::<Pair<K, T>>::new(self.data_device.clone(), lba, 0);
+            if page.dirty {
+                page.dirty = false;
+                break;
+            }
+
+            println!("{}", format!("{:-<56}", format!("Block #{}", lba)).blue());
+            for record in &page.records {
+                println!("{}->{}", record.key, record.value);
+            }
+            println!("{}", format!("{:-<56}\n", "").blue());
+
+            lba += 1;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use rand::{seq::SliceRandom, thread_rng};
 
     use crate::{btree_key::IntKey, record::IntRecord};
@@ -755,7 +806,7 @@ mod tests {
 
         let device = BlockDevice::new("test_search.hex".to_string(), block_size, false).unwrap();
         let mut data_device = BlockDevice::new("test_search_data.hex".to_string(), block_size, false).unwrap();
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
         assert_ne!(btree.search(IntKey { value: 20 }), None);
         assert_ne!(btree.search(IntKey { value: 10 }), None);
@@ -866,7 +917,7 @@ mod tests {
         let device = BlockDevice::new("test_insert_random.hex".to_string(), block_size, true).unwrap();
         let data_device = BlockDevice::new("test_insert_random_data.hex".to_string(), block_size, true).unwrap();
 
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
         let mut keys: Vec<i32> = (1..1000).collect();
         keys.shuffle(&mut thread_rng());
@@ -890,7 +941,7 @@ mod tests {
         let device = BlockDevice::new("test_insert_increasing.hex".to_string(), block_size, true).unwrap();
         let data_device = BlockDevice::new("test_insert_increasing_data.hex".to_string(), block_size, true).unwrap();
 
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
         let keys: Vec<i32> = (1..1000).collect();
 
@@ -914,7 +965,7 @@ mod tests {
         let device = BlockDevice::new("test_insert_decreasing.hex".to_string(), block_size, true).unwrap();
         let data_device = BlockDevice::new("test_insert_decreasing_data.hex".to_string(), block_size, true).unwrap();
 
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
         let mut keys: Vec<i32> = (1..100).collect();
         keys.reverse();
@@ -940,7 +991,7 @@ mod tests {
         let data_device =
             BlockDevice::new("test_insert_small_random_duplicates.hex".to_string(), block_size, true).unwrap();
 
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
         let mut keys: Vec<i32> = (1..5).collect();
         keys.reverse();
@@ -967,31 +1018,40 @@ mod tests {
     fn test_remove_small() -> Result<(), std::io::Error> {
         let block_size = 21 * 4; // t = 2
 
-        let device = BlockDevice::new("test_remove_leaf.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_remove_leaf.hex".to_string(), block_size, true).unwrap();
+        let device = BlockDevice::new("test_remove_small.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_remove_small_data.hex".to_string(), block_size, true).unwrap();
 
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
         let keys: Vec<i32> = (1..5).collect();
 
         for key in &keys {
             btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
+            btree.print();
+            btree.print_data();
         }
-
-        btree.print();
 
         assert_ne!(btree.search(IntKey { value: 2 }), None);
         btree.remove(IntKey { value: 2 });
         assert_eq!(btree.search(IntKey { value: 2 }), None);
         btree.print();
+        btree.print_data();
 
         btree.remove(IntKey { value: 4 });
         assert_eq!(btree.search(IntKey { value: 4 }), None);
         btree.print();
+        btree.print_data();
 
         btree.remove(IntKey { value: 1 });
         assert_eq!(btree.search(IntKey { value: 1 }), None);
         btree.print();
+        btree.print_data();
+
+        for key in &keys {
+            btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
+            btree.print();
+            btree.print_data();
+        }
 
         Ok(())
     }
@@ -1001,34 +1061,49 @@ mod tests {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_remove_medium.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_remove_medium.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_remove_medium_data.hex".to_string(), 256, true).unwrap();
 
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
-        //let mut keys: Vec<i32> = vec![5, 2, 1, 3, 4, 6, 10, 15, 20, 12,];
-        //let keys_to_remove = vec![12, 4, 2, 3, 5, 10, 15, 1, 6];
-        let mut keys: Vec<i32> = vec![5, 2, 1, 3, 4, 6, 10, 15, 20, 19, 18, 17, 12, 11, 9, 7, 8, 13, 14, 16];
+        let keys: Vec<i32> = vec![5, 2, 1, 3, 4, 6, 10, 15, 20, 19, 18, 17, 12, 11, 9, 7, 8, 13, 14, 16];
         let keys_to_remove = vec![12, 9, 19, 2, 8, 7, 5, 10, 15, 1, 14, 20, 13, 6, 11, 18, 17, 16, 4, 3];
-        //let mut keys_to_remove: Vec<i32> = keys.clone();
-        //keys_to_remove.shuffle(&mut thread_rng());
-        println!("{:?}", keys_to_remove);
+        //let keys: Vec<i32> = vec![5, 2, 1, 6, 15, 20, 19, 18, 12, 11, 9, 8];
+        //let keys_to_remove = vec![12, 9, 19, 2, 8, 5, 15, 1, 20, 6, 11, 18];
+        let mut data_map = HashMap::<i32, u64>::new();
 
         let mut keys_to_stay: Vec<i32> = keys.clone();
 
         for key in &keys {
             btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
+
+            let node = btree.search(IntKey { value: *key }).unwrap();
+            data_map.insert(node.key.value, node.data_lba);
+            for (key, lba) in &data_map {
+                let found = btree.search(IntKey { value: *key }).unwrap();
+                assert_eq!(found.data_lba, *lba);
+            }
         }
 
         btree.print();
+        btree.print_data();
 
         for key in &keys_to_remove {
             println!("Removing {:?}", *key);
 
             assert_ne!(btree.search(IntKey { value: *key }), None);
-            btree.remove(IntKey { value: *key });
+            let removed = btree.remove(IntKey { value: *key });
             btree.print();
+            btree.print_data();
 
             assert_eq!(btree.search(IntKey { value: *key }), None);
+
+            assert_eq!(removed, IntRecord::from_string(key.to_string()).unwrap());
+
+            data_map.remove(key);
+            for (key, lba) in &data_map {
+                let found = btree.search(IntKey { value: *key }).unwrap();
+                assert_eq!(found.data_lba, *lba);
+            }
 
             let index = keys_to_stay.iter().position(|x| *x == *key).unwrap();
             keys_to_stay.remove(index);
@@ -1052,9 +1127,9 @@ mod tests {
         let block_size = 21 * 4; // t = 2
 
         let device = BlockDevice::new("test_remove_smoke.hex".to_string(), block_size, true).unwrap();
-        let data_device = BlockDevice::new("test_remove_smoke.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_remove_smoke_data+.hex".to_string(), block_size, true).unwrap();
 
-        let mut btree = BTree::<IntKey, IntRecord>::new(device, data_device);
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
 
         let mut keys: Vec<i32> = (1..=1000).collect();
         keys.shuffle(&mut thread_rng());
@@ -1082,6 +1157,73 @@ mod tests {
         }
 
         btree.print();
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_add() -> Result<(), std::io::Error> {
+        let block_size = 21 * 4; // t = 2
+
+        let device = BlockDevice::new("test_remove_add.hex".to_string(), block_size, true).unwrap();
+        let data_device = BlockDevice::new("test_remove_add_data.hex".to_string(), 256, true).unwrap();
+
+        let mut btree = BTree::<IntKey, IntRecord>::new(Rc::new(RefCell::new(device)), Rc::new(RefCell::new(data_device)));
+
+        let keys: Vec<i32> = vec![5, 2, 1, 3, 4, 6, 10, 15, 20, 19, 18, 17, 12, 11, 9, 7, 8, 13, 14, 16];
+        let keys_to_remove = vec![12, 9, 19, 2, 8, 7, 5, 10, 15, 1, 14];
+
+        let mut data_map = HashMap::<i32, u64>::new();
+
+        let mut keys_to_stay: Vec<i32> = keys.clone();
+
+        for key in &keys {
+            btree.insert(IntKey { value: *key }, IntRecord::from_string(key.to_string()).unwrap());
+
+            let node = btree.search(IntKey { value: *key }).unwrap();
+            data_map.insert(node.key.value, node.data_lba);
+            for (key, lba) in &data_map {
+                let found = btree.search(IntKey { value: *key }).unwrap();
+                assert_eq!(found.data_lba, *lba);
+            }
+        }
+
+        btree.print();
+        btree.print_data();
+
+        for key in &keys_to_remove {
+            println!("Removing {:?}", *key);
+
+            assert_ne!(btree.search(IntKey { value: *key }), None);
+            let removed = btree.remove(IntKey { value: *key });
+
+            assert_eq!(btree.search(IntKey { value: *key }), None);
+
+            assert_eq!(removed, IntRecord::from_string(key.to_string()).unwrap());
+
+            data_map.remove(key);
+            for (key, lba) in &data_map {
+                let found = btree.search(IntKey { value: *key }).unwrap();
+                assert_eq!(found.data_lba, *lba);
+            }
+
+            let index = keys_to_stay.iter().position(|x| *x == *key).unwrap();
+            keys_to_stay.remove(index);
+
+            for key in &keys_to_stay {
+                assert_ne!(btree.search(IntKey { value: *key }), None);
+            }
+        }
+
+        for key in &keys_to_stay {
+            assert_ne!(btree.search(IntKey { value: *key }), None);
+        }
+
+        btree.print_data();
+        btree.insert(IntKey { value: 100 }, IntRecord::from_string(100.to_string()).unwrap());
+        btree.insert(IntKey { value: 101 }, IntRecord::from_string(101.to_string()).unwrap());
+        btree.insert(IntKey { value: 102 }, IntRecord::from_string(102.to_string()).unwrap());
+        btree.print_data();
 
         Ok(())
     }

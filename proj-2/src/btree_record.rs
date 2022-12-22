@@ -64,16 +64,18 @@ where
         if let Some(child) = self.child_lba {
             write!(
                 f,
-                "{:>2}.{}",
+                "{:>2}.{}({})",
                 format!("{}", child),
                 format!("{}", self.key),
+                format!("{}", self.data_lba),
             )
         } else {
             write!(
                 f,
-                "{:>2}.{}",
+                "{:>2}.{}({})",
                 "*",
                 format!("{}", self.key),
+                format!("{}", self.data_lba),
             )
         }
     }

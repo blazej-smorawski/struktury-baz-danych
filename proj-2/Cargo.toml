@@ -11,3 +11,4 @@ rand = "0.8.5"
 primes = "0.3.0"
 colored = "2.0.0"
 lru = "0.8.1"
+clap = { version = "4.0", features = ["derive"] }

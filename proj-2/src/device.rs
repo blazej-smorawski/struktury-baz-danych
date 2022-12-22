@@ -58,4 +58,8 @@ impl BlockDevice {
         self.writes += 1;
         self.write_internal(lba, buf)
     }
+
+    pub fn get_size(&self) -> u64 {
+        self.file.metadata().unwrap().len()
+    }
 }

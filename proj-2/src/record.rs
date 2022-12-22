@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, mem::size_of};
+use std::{cmp::Ordering, mem::size_of, fmt::Display};
 
 use byteorder::{ByteOrder, LittleEndian};
 use primes::is_prime;
@@ -6,14 +6,14 @@ use rand::Rng;
 
 use crate::bytes::Bytes;
 
-pub trait Record: Bytes + Ord + Copy {
+pub trait Record: Bytes + Ord + Copy + Display {
     fn new() -> Self;
     fn from_string(string: String) -> Result<Self, std::io::Error>;
     fn from_random() -> Result<Self, std::io::Error>;
     fn print(&self);
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct IntRecord {
     numbers: [u32; 15],
 }
@@ -130,6 +130,12 @@ impl PartialEq for IntRecord {
             }
         }
         primes == other_primes
+    }
+}
+
+impl Display for IntRecord{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?} <=> {}", self.numbers, self.get_primes())
     }
 }
 
