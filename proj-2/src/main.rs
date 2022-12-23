@@ -14,7 +14,7 @@ use colored::Colorize;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about = "B-Tree experiment", long_about = None)]
 struct Args {
     #[arg(short, long, default_value_t = true)]
     truncate: bool,
@@ -27,13 +27,15 @@ struct Args {
 }
 
 fn main() {
-    let index_device = Rc::new(RefCell::new(BlockDevice::new("index.hex".to_string(), 84, true).expect("Could not create index device")));
-    let data_device =Rc::new(RefCell::new( BlockDevice::new("data.hex".to_string(), 256, true).expect("Could not create data device")));
+    let args = Args::parse();
+
+    let index_device = Rc::new(RefCell::new(BlockDevice::new("index.hex".to_string(), args.index_block_size, args.truncate).expect("Could not create index device")));
+    let data_device =Rc::new(RefCell::new( BlockDevice::new("data.hex".to_string(), args.data_block_size, args.truncate).expect("Could not create data device")));
 
     {
         let mut b_tree = BTree::<IntKey, IntRecord>::new(index_device.clone(), data_device.clone());
 
-        println!("Available operations: insert, remove, search, print, print data, print stats");
+        println!("Available operations: insert, remove, search, print, print data, print stats, reset stats");
         let stdin = io::stdin();
         let mut handle = stdin.lock();
         loop {
@@ -80,7 +82,7 @@ fn main() {
                 "search" => {
                     let mut insert_input = String::new();
                     handle.read_line(&mut insert_input).unwrap();
-                    let key = IntKey{ value: insert_input.parse().unwrap()};
+                    let key = IntKey{ value: insert_input.trim().parse().unwrap()};
                     match b_tree.search(key){
                         Some(_) => println!("{}", format!("Found").green()),
                         None => println!("{}", format!("Not found").yellow())
@@ -95,8 +97,17 @@ fn main() {
                 "print stats" => {
                     let index_device = index_device.borrow();
                     let data_device = data_device.borrow();
-                    println!("{}", format!("Index:\tReads->{}\tWrites->{}\tSize->{}", index_device.reads, index_device.writes, index_device.get_size()).blue());
-                    println!("{}", format!("Data:\tReads->{}\tWrites->{}\tSize->{}", data_device.reads, data_device.writes, data_device.get_size()).blue());
+                    println!("{}", format!("Index:\tReads:\t{}\tWrites:\t{}\tSize:\t{}", index_device.reads, index_device.writes, index_device.get_size()).blue());
+                    println!("{}", format!("Data:\tReads:\t{}\tWrites:\t{}\tSize:\t{}", data_device.reads, data_device.writes, data_device.get_size()).blue());
+                },
+                "reset stats" => {
+                    let mut index_device = index_device.borrow_mut();
+                    let mut data_device = data_device.borrow_mut();
+                    index_device.writes = 0;
+                    data_device.writes =0;
+                    index_device.reads = 0;
+                    data_device.reads =0;
+
                 },
                 _ => {
                     println!("{}", format!("Unknown operation!").red())
@@ -104,9 +115,4 @@ fn main() {
             }
         }
     }
-
-    let index_device = index_device.borrow();
-    let data_device = data_device.borrow();
-    println!("{}", format!("Index:\tReads->{}\tWrites->{}\tSize->{}", index_device.reads, index_device.writes, index_device.get_size()).blue());
-    println!("{}", format!("Data:\tReads->{}\tWrites->{}\tSize->{}", data_device.reads, data_device.writes, data_device.get_size()).blue());
 }

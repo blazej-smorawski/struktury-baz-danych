@@ -30,7 +30,8 @@ impl<K: BTreeKey, T: Record> BTree<K, T> {
         let degree;
         {
             let index_device = index_device.borrow_mut();
-            let child_count: u64 = index_device.block_size / BTreeRecord::<K>::get_size();
+            let size = BTreeRecord::<K>::get_size();
+            let child_count: u64 = index_device.block_size / size;
             degree = child_count / 2;
         }
 
